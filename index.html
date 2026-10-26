@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>OTT Radar</title>
+  <meta name="description" content="Upcoming and recent OTT releases in India — where to stream them, and how sure the date is.">
+  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="OTT Radar">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="16" cy="16" r="6" fill="none" stroke="currentColor" stroke-width="2.5" opacity=".55"/><path d="M16 16 L26 8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="16" cy="16" r="2.4" fill="currentColor"/></svg>
+      <h1>OTT Radar</h1>
+      <span class="updated" id="updated"></span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="upcoming" aria-selected="true">Upcoming</button>
+      <button role="tab" data-tab="out">Out now</button>
+      <button role="tab" data-tab="saved">Saved <span id="saved-count"></span></button>
+    </nav>
+  </header>
+
+  <section class="controls">
+    <input id="q" type="search" placeholder="Search title, cast, platform…" autocomplete="off" enterkeyhint="search">
+    <div class="chips" id="lang-chips" aria-label="Language"></div>
+    <div class="chips" id="platform-chips" aria-label="Platform"></div>
+    <div class="row">
+      <div class="seg" id="type-seg" aria-label="Type">
+        <button data-type="all" aria-pressed="true">All</button>
+        <button data-type="movie">Movies</button>
+        <button data-type="series">Series</button>
+      </div>
+      <label class="toggle"><input type="checkbox" id="hide-rumored"> Hide rumours</label>
+    </div>
+  </section>
+
+  <main id="list" aria-live="polite"></main>
+
+  <footer class="foot">
+    <p class="legend">
+      <span class="dot confirmed"></span> Confirmed — official, or 2+ outlets agree
+      <span class="dot reported"></span> Reported — one outlet
+      <span class="dot rumored"></span> Rumoured — hedged reports
+    </p>
+    <p>Dates come from Indian entertainment news, read daily, plus <a href="https://www.themoviedb.org/" rel="noopener">TMDB</a>. Streaming availability from <a href="https://www.justwatch.com/in" rel="noopener">JustWatch</a> via TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+    <p>IMDb ratings: Information courtesy of IMDb (<a href="https://www.imdb.com" rel="noopener">https://www.imdb.com</a>). Used with permission.</p>
+  </footer>
+
+  <template id="card-tpl">
+    <article class="card">
+      <button class="card-main" aria-expanded="false">
+        <div class="poster"></div>
+        <div class="info">
+          <h3 class="title"></h3>
+          <p class="meta"></p>
+          <p class="imdb" hidden></p>
+          <ul class="streams"></ul>
+        </div>
+      </button>
+      <button class="star" aria-label="Save"></button>
+      <div class="details" hidden></div>
+    </article>
+  </template>
+
+  <script src="assets/app.js" type="module"></script>
+</body>
+</html>

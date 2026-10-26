@@ -1,0 +1,89 @@
+name: Update data and deploy
+
+on:
+  schedule:
+    - cron: '30 0 * * *'   # 06:00 IST
+    - cron: '30 12 * * *'  # 18:00 IST
+  workflow_dispatch:
+    inputs:
+      backfill_days:
+        description: 'Also read older news, this many days back (e.g. 60). Leave 0 for a normal run.'
+        default: '0'
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ott-radar
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # Code pushes only redeploy; scheduled and manual runs refresh the data first.
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      MAX_ARTICLES: ${{ vars.MAX_ARTICLES }}
+      BACKFILL_DAYS: ${{ inputs.backfill_days || '0' }}
+    steps:
+      # A queued run would otherwise start from the commit current when it was
+      # triggered, missing data pushed by the run before it.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Fetch news and rebuild data
+        run: node scripts/update.mjs
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          commit() {
+            git add data/
+            if git diff --cached --quiet; then echo "No data changes"; return 1; fi
+            git commit -m "data: update $(date -u +%Y-%m-%dT%H:%MZ)"
+          }
+          commit || exit 0
+          git push origin HEAD:main && exit 0
+          # main moved during the run. Generated files can't be merged, so redo
+          # the update on top of the latest commit and push that instead.
+          echo "main moved during the run; rebuilding on the latest commit"
+          git fetch origin main
+          git reset --hard origin/main
+          node scripts/update.mjs
+          commit || exit 0
+          git push origin HEAD:main
+
+  deploy:
+    needs: update
+    if: always() && (needs.update.result == 'success' || needs.update.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Assemble site
+        run: |
+          mkdir -p _site/data
+          cp -r index.html manifest.webmanifest assets _site/
+          cp data/releases.json _site/data/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v5

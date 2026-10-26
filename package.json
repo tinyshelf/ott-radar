@@ -1,0 +1,16 @@
+{
+  "name": "ott-radar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tracks upcoming and past OTT releases in India, with source-backed confidence.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "update": "node scripts/update.mjs",
+    "rebuild": "node scripts/update.mjs --offline",
+    "test": "node --test \"test/*.test.mjs\"",
+    "serve": "node scripts/serve.mjs"
+  }
+}
