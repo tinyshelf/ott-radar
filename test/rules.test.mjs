@@ -183,6 +183,13 @@ test('single-title article: announcement date is not the streaming date', () => 
   assert.equal(facts[0].certainty, 'official');
 });
 
+test('single-title article about a sequel ignores lines about the first film', () => {
+  const facts = extractFromArticle(article('Mookuthi Amman 2 OTT Release Date – JioHotstar Secures Rights',
+    "JioHotstar has acquired the digital rights of Nayanthara's Mookuthi Amman 2 after its theatrical run.\nMookuthi Amman Streaming Now on JioHotstar – Watch the First Film"), dict, TODAY);
+  assert.equal(facts.length, 1);
+  assert.deepEqual([facts[0].title, facts[0].platform, facts[0].streaming_now], ['Mookuthi Amman 2', 'jiohotstar', false]);
+});
+
 test('single-title article with no platform or date yields nothing', () => {
   const facts = extractFromArticle(article("‘Haiku’ OTT release date: Where to watch Aegan, Sridevi Apalla’s Tamil romance after theatrical run",
     'Tamil romantic drama Haiku arrived in theaters on October 23, 2026. An official OTT release date for Haiku is yet to be announced.'), dict, TODAY);

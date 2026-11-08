@@ -347,12 +347,17 @@ function fact(entry, extra, contextText) {
 
 function extractSingle(article, focus, dict, ref) {
   const focusDict = compileDictionary([focus]);
+  // "Mookuthi Amman Streaming Now – Watch the First Film" in a story about
+  // Mookuthi Amman 2 is about the first film.
+  const earlier = focus.title.match(/^(.+?)\s+(?:\d{1,2}|II|III|IV)$/)?.[1];
+  const earlierDict = earlier ? compileDictionary([{ title: earlier, force: true }]) : null;
   const sentences = splitSentences(`${article.title}\n${article.text || ''}`);
   const evidence = [];
   sentences.forEach((raw, i) => {
     const mentionsFocus = findTitles(raw, focusDict).length > 0;
     const others = findTitles(raw, dict).filter((m) => m.entry.key !== focus.key && !focus.key.includes(m.entry.key));
     if (others.length && !mentionsFocus) return;
+    if (!mentionsFocus && earlierDict && findTitles(raw, earlierDict).length) return;
     const s = deglue(raw);
     const platforms = findPlatforms(s);
     if (!platforms.length && !/\b(?:OTT|stream\w*|digital\w*)\b/i.test(s)) return;

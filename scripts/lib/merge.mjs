@@ -134,11 +134,14 @@ export function resolveStream(claims, today) {
     .sort((a, b) => ts(b) - ts(a))
     .map((c) => [c.url, { outlet: c.outlet, url: c.url, headline: c.headline, published: c.published, date: c.date, certainty: c.certainty }])).values()].slice(0, 8);
 
+  // A streaming date still to come outranks "available" signals: JustWatch lists
+  // a show's older seasons, and "now streaming" lines can be about another film.
+  const upcoming = !!date && (date.length === 10 ? date > today : date > today.slice(0, 7));
   return {
     date,
     precision: date ? (date.length === 7 ? 'month' : 'day') : null,
     status,
-    available: available || (status === 'confirmed' && !!date && date.length === 10 && date <= today),
+    available: !upcoming && (available || (status === 'confirmed' && !!date && date.length === 10 && date <= today)),
     conflicts,
     outlets: newsOutlets(claims),
     first_seen: new Date(Math.min(...claims.map(ts))).toISOString().slice(0, 10),

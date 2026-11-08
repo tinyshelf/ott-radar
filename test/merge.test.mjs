@@ -163,6 +163,19 @@ test('a "now streaming" report without a date lands in out-now as available', ()
   assert.equal(s.status, 'confirmed');
 });
 
+test('a future streaming date is not available, whatever JustWatch or a "now streaming" line says', () => {
+  // JustWatch lists the platform early (older seasons, catalogue pre-listing);
+  // the news date says the release is still to come.
+  const justWatch = { ...claim({ date: null, certainty: 'official', outlet: 'JustWatch' }), available: true };
+  const s = resolveStream([claim({ date: '2026-11-13' }), claim({ date: '2026-11-13', outlet: 'Outlet B' }), justWatch], TODAY);
+  assert.equal(s.date, '2026-11-13');
+  assert.equal(s.available, false);
+  const month = resolveStream([claim({ date: '2026-12', certainty: 'official' }), justWatch], TODAY);
+  assert.equal(month.available, false);
+  const past = resolveStream([claim({ date: '2026-10-23' }), justWatch], TODAY);
+  assert.equal(past.available, true);
+});
+
 test('unknown platforms are kept with their display name', () => {
   const c = factToClaim({
     title: 'Some Film', type: 'movie', language: 'kn', year: 2026, platform: 'Namma Flix', date: null, certainty: 'reported',
