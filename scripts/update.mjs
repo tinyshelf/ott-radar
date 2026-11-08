@@ -12,7 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectHeadlines, fetchArticles, selectHeadlines } from './lib/collect.mjs';
-import { commonWords, compileDictionary, extractFromArticle } from './lib/rules.mjs';
+import { commonWords, compileDictionary, extractFromArticle, tidyTitle } from './lib/rules.mjs';
 import { refreshDictionary } from './lib/dictionary.mjs';
 import { createTmdb, MATCH_VERSION } from './lib/tmdb.mjs';
 import { fetchRatings } from './lib/imdb.mjs';
@@ -53,11 +53,21 @@ async function writeLines(file, header, key, rows) {
   await fs.writeFile(path.join(DATA, file), text);
 }
 
+// claims.json keeps titles as first extracted. Older ones predate tidyTitle, so
+// they are cleaned on use, and headline fragments ("From Theatres") are left out.
+function tidied(claims) {
+  return claims.flatMap((c) => {
+    const title = tidyTitle(c.title);
+    if (!title) return [];
+    return title === c.title ? [c] : [{ ...c, title }];
+  });
+}
+
 // Wikipedia/TMDB titles plus every title seen in the last 180 days of claims.
 // One-word titles that are ordinary words in this batch of articles are dropped.
 function buildDictionary(titles, claims, articles) {
   const recent = addDays(today, -180);
-  const fromClaims = claims
+  const fromClaims = tidied(claims)
     .filter((c) => c.seen >= recent)
     .map((c) => ({ title: c.title, language: c.language, type: c.type, year: c.year }));
   return compileDictionary([...fromClaims, ...titles.entries], { common: commonWords(articles.map((a) => a.text || '')) });
@@ -187,20 +197,21 @@ async function main() {
     console.log(`  ${titles.entries.length} titles`);
     const keepGoing = await stepNews(claims, seen, titles);
     if (!keepGoing) return;
-    await stepTmdb(claims, cache);
+    await stepTmdb(tidied(claims), cache);
     imdb = await stepImdb(cache, imdb);
   }
 
   // TMDB-only entries (no news about them) count only for recent films; the news
   // decides for everything else.
-  const referenced = new Set(claims.map((c) => cache.matches[matchKey(c)]).filter((m) => m?.id).map((m) => `${m.type}:${m.id}`));
+  const news = tidied(claims);
+  const referenced = new Set(news.map((c) => cache.matches[matchKey(c)]).filter((m) => m?.id).map((m) => `${m.type}:${m.id}`));
   const minYear = Number(today.slice(0, 4)) - 1;
   const derived = Object.entries(cache.details)
     .filter(([key, d]) => referenced.has(key) || (d.year ?? 0) >= minYear)
     .flatMap(([, d]) => tmdbClaims(d));
-  const releases = buildReleases([...claims, ...derived], { ...cache, ratings: imdb.ratings }, today)
+  const releases = buildReleases([...news, ...derived], { ...cache, ratings: imdb.ratings }, today)
     .filter((r) => WANTED.includes(r.language));
-  console.log(`Built ${releases.length} releases from ${claims.length} news claims + ${derived.length} TMDB claims`);
+  console.log(`Built ${releases.length} releases from ${news.length} news claims + ${derived.length} TMDB claims`);
 
   for (const [link, day] of Object.entries(seen)) if (day < addDays(today, -30)) delete seen[link];
   claims.sort((a, b) => a.seen.localeCompare(b.seen) || a.id.localeCompare(b.id));

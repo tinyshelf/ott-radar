@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileDictionary, extractFromArticle, findDates, findPlatforms, headlineTitle } from '../scripts/lib/rules.mjs';
+import { compileDictionary, extractFromArticle, findDates, findPlatforms, headlineTitle, tidyTitle } from '../scripts/lib/rules.mjs';
 import { parseWikiFilmList } from '../scripts/lib/dictionary.mjs';
 
 const TODAY = '2026-10-25';
@@ -57,6 +57,48 @@ test('headlineTitle pulls single titles and rejects round-ups and announcements'
   assert.equal(headlineTitle('Netflix Announces Anand Deverakonda’s Epic OTT Release Date'), null);
   assert.equal(headlineTitle('New OTT releases this week: Gajab Raat, Dorothy and more'), null);
   assert.equal(headlineTitle('7 South OTT Releases to Watch This Week: Nani starrer The Paradise'), null);
+});
+
+test('tidyTitle strips headline status words and rejects fragments', () => {
+  const cases = {
+    'Baththa Now Streaming': 'Baththa',
+    'Mirzapur The Movie arrives': 'Mirzapur The Movie',
+    'Udta Teer Movie :': 'Udta Teer',
+    'Obsession Hindi Dub': 'Obsession',
+    'Obsession Hindi Version': 'Obsession',
+    'Sigma: Reported': 'Sigma',
+    'Baththa: Potential': 'Baththa',
+    'Don’t Trouble the Trouble: Can': 'Don’t Trouble the Trouble',
+    'Baththa: Missed in Theatres, Masterpiece': 'Baththa',
+    'Baththa on Netflix: Vijay Sethupathi': 'Baththa',
+    'Dorothy, starring Keerthy Suresh,': 'Dorothy',
+    'OTT Alert: Anakapalli': 'Anakapalli',
+    'The Vvan Hits': 'The Vvan',
+    // Real titles stay as they are.
+    'Mirzapur: The Movie': 'Mirzapur: The Movie',
+    'Ramayana: Part 1': 'Ramayana: Part 1',
+    'Dhurandhar 2': 'Dhurandhar 2',
+    'One Year to Live, Buy a Man': 'One Year to Live, Buy a Man',
+    'Saas Bahu Achaar Pvt. Ltd.': 'Saas Bahu Achaar Pvt. Ltd.',
+    'Animal': 'Animal',
+    '418 Movie Watch Online:': '418',
+    'The Super Mario Galaxy Movie': 'The Super Mario Galaxy Movie',
+    'The Big Short': 'The Big Short',
+  };
+  for (const [raw, want] of Object.entries(cases)) assert.equal(tidyTitle(raw), want, raw);
+  for (const junk of ['850 Crore Blockbuster', 'Rs 800 Crore Hit, Yet', 'From Theatres', 'Netflix October 30', 'Akka to Obsession: 7', '8 South', 'Friday', 'Halloween']) {
+    assert.equal(tidyTitle(junk), null, junk);
+  }
+});
+
+test('headlineTitle treats day and festival listicles as round-ups and tidies the title', () => {
+  assert.equal(headlineTitle('Friday OTT Releases (October 30): Watch Obsession, A Couple Of Lies And More Online'), null);
+  assert.equal(headlineTitle('Halloween OTT watchlist: From ‘Obsession’ to ‘Train to Busan’, 6 horror films to binge'), null);
+  assert.equal(headlineTitle("8 South OTT And Theatrical Releases To Watch In Diwali Weekend: I'm Game, Meesaya Murukku 2"), null);
+  assert.equal(headlineTitle('From Theatres to OTT: Can Jailer 2 Repeat the Madness?'), null);
+  assert.equal(headlineTitle('Rs 800 Crore Hit, Yet OTT So Soon?'), null);
+  assert.equal(headlineTitle('Baththa Now Streaming On OTT: Where To Watch Vijay Sethupathi And Lijomol Jose Film Online'), 'Baththa');
+  assert.equal(headlineTitle("Sundeep Kishan’s Sigma: Reported OTT Release Date And Streaming Details"), 'Sigma');
 });
 
 test('round-up with "Title (Platform, date)" entries', () => {

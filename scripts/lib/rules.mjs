@@ -290,6 +290,38 @@ const HEADLINE_PATTERNS = [
   /^(.{2,80}?)\s+(?:digital\s+(?:premiere|release|debut|rights)|streaming\s+(?:date|rights|platform|partner))\b/i,
 ];
 
+// Headline words around a title that aren't part of it: "OTT Alert: Anakapalli",
+// "Baththa Now Streaming", "Udta Teer Movie :", "Sigma: Reported".
+const TITLE_LEAD = /^(?:OTT\s+alert|alert)\s*[:|–-]\s*/i;
+const STATUS_TAIL = /\s+(?:(?:is\s+)?now\s+streaming|streaming|arrives|hits|lands|drops|(?:(?:movie|film)\s+)?watch\s+online|hindi\s+(?:dub(?:bed)?|version))$/i;
+// "Udta Teer Movie :" but not "The Super Mario Galaxy Movie".
+const KIND_TAIL = /(?<!\bThe)\s+(?:movie|film)\s*:$/i;
+const HEDGE_SUBTITLE = /:\s*(?:potential|reported|expected|can|will|possible|likely|official|confirmed|final|big|latest)$/i;
+const NOT_TITLE = /^(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|today|tomorrow|tonight|halloween|diwali|christmas|new\s+year)$/i;
+const COUNT_LEAD = /^\d+\s+(?:south|north|hindi|tamil|telugu|malayalam|kannada|english|new|best|top|upcoming)\b/i;
+
+// Cleans a title taken from a headline (or stored from an older run); null when
+// it is not a title at all: "Rs 800 Crore Hit, Yet", "From Theatres", "Netflix
+// October 30", "Akka to Obsession: 7".
+export function tidyTitle(raw) {
+  let t = String(raw ?? '').trim().replace(TITLE_LEAD, '').replace(/,\s*(?:starring|featuring|with)\b.*$/i, '');
+  // "Baththa on Netflix: Vijay Sethupathi" -> "Baththa".
+  const on = findPlatforms(t).find((p) => /\s(?:now\s+)?on\s+$/i.test(t.slice(0, p.start)));
+  if (on) t = t.slice(0, on.start).replace(/\s+(?:now\s+)?on\s+$/i, '');
+  // "Baththa: Missed in Theatres, Masterpiece": a sentence after the colon.
+  t = t.replace(/:[^:]*,.*$/, '');
+  for (let prev = ''; prev !== t;) {
+    prev = t;
+    t = t.replace(KIND_TAIL, '').replace(/[\s:,;–-]+$/, '').replace(STATUS_TAIL, '').replace(HEDGE_SUBTITLE, '');
+  }
+  if (!t || NOT_TITLE.test(t) || COUNT_LEAD.test(t) || /:\s*\d+$/.test(t)) return null;
+  if (/\b(?:crore|lakh)\b|^rs\.?\s/i.test(t) || /^(?:from\s+)?(?:theat(?:re|er)s?|cinemas?|big\s+screens?)$/i.test(t)) return null;
+  // Nothing but platforms and dates.
+  let rest = t;
+  for (const s of [...findPlatforms(t), ...findDates(t, '2026-01-01')].sort((a, b) => b.start - a.start)) rest = rest.slice(0, s.start) + rest.slice(s.end);
+  return /[\p{L}\d]/u.test(rest) ? t : null;
+}
+
 // Pulls the title out of single-title headlines; null for round-ups and others.
 export function headlineTitle(headline) {
   if (ROUNDUP.test(headline)) return null;
@@ -307,6 +339,8 @@ export function headlineTitle(headline) {
       .replace(/^[‘'"“]+|[’'"”]+$/g, '').trim()
       .replace(/(?<!\bThe)\s+(?:movie|film|web\s*series|series)$/i, '').trim()
       .replace(/(?:\s+(?:on|in|to|at|from|now|is|set|gets|and))+$/i, '').trim();
+    t = tidyTitle(t);
+    if (!t) return null;
     if (/\bEpisode\b/i.test(t) || /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(?:\d{4}|\d{1,2})\b/.test(t)) return null;
     const words = t.split(/\s+/);
     if (words.length > 7 || t.length < 2 || t.length > 60) return null;

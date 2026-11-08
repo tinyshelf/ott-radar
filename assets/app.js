@@ -228,7 +228,8 @@ function card({ release: r, focus }) {
     poster.style.background = `linear-gradient(150deg, hsl(${h} 55% 45%), hsl(${(h + 40) % 360} 60% 28%))`;
     poster.textContent = r.title.replace(/^(the|a|an)\s+/i, '').slice(0, 1).toUpperCase();
   }
-  $('.title', node).append(r.title, r.year ? el('span', { class: 'yr' }, ` (${r.year})`) : null);
+  $('.title', node).append(r.title);
+  if (r.year) $('.title', node).append(el('span', { class: 'yr' }, ` (${r.year})`));
   $('.meta', node).textContent = [DATA.languages[r.language] ?? r.language?.toUpperCase(), r.type === 'series' ? 'Series' : 'Movie', ...(r.genres ?? []).slice(0, 2)]
     .filter(Boolean).join(' · ');
   if (r.imdb?.rating) {

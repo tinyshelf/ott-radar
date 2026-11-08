@@ -46,4 +46,4 @@ export function gnewsFeeds(range = 'when:7d') {
 export const RELEVANT = /\bOTT\b|\bstream(ing|s)?\b|digital (premiere|release|debut|rights)|where to watch|watch online|\bnetflix\b|prime video|jiohotstar|hotstar|\bzee5\b|sony ?liv|\baha\b|sun ?nxt|manorama ?max|etv win|hoichoi|apple tv|mx player|premieres? on/i;
 
 // Weekly round-ups name many titles per article, so they are processed first.
-export const ROUNDUP = /this week|this weekend|releases (on|this|of the week)|new (ott|releases)|titles? to watch|\b\d+ new\b|(movies|shows) (on|to watch)/i;
+export const ROUNDUP = /this week|this weekend|releases (on|this|of the week)|new (ott|releases)|titles? to watch|\b\d+ new\b|(movies|shows) (on|to watch)|\bott (and theatrical )?releases\b|watchlist/i;
