@@ -21,7 +21,7 @@ claims (+ optional TMDB posters/availability) ─► merge.mjs ─► releases.j
 **Extraction** (`scripts/lib/rules.mjs`) uses no AI. It handles two kinds of article:
 
 - **Single-title stories** ("Jailer 2 OTT release date: …"): the title comes from the headline. Platform and date are pooled from every sentence about streaming.
-- **Round-ups** ("OTT releases this week"): known titles are found in the text, and each one takes the platform and date in its own sentence or in "Where to watch: / Streaming date:" lines.
+- **Round-ups** ("OTT releases this week"): known titles are found in the text, and each one takes the platform and date in its own sentence or in "Where to watch: / Streaming date:" lines. When a title is a heading ("3. Haiwaan", "Haiwaan – SonyLIV"), it reads the blurb and field lines under it, up to the next heading. Article text keeps the page's headings, which JSON-LD `articleBody` usually drops.
 
 A date counts only when the closest cue word is about streaming, not theatres, announcements or trailers. Hedged wording ("expected", "reportedly", "not confirmed") marks a claim as a rumour.
 

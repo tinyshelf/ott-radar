@@ -8,7 +8,13 @@ export const INDIAN_LANGS = WANTED_INDIAN.join('|');
 export const WANTED_LANGS = WANTED.join('|');
 const INDIAN_SET = new Set(INDIAN_LANGS.split('|'));
 // Bump when matching rules change so cached matches are redone.
-export const MATCH_VERSION = 2;
+export const MATCH_VERSION = 3;
+
+// News names a season ("Wednesday Season 3"); TMDB lists the show once ("Wednesday").
+export function searchTitle({ title, type }) {
+  if (type !== 'series') return title;
+  return title.replace(/\s+(?:season|S)\s*\d{1,2}\b.*$/i, '').trim() || title;
+}
 
 // Accepts either a v3 API key or a v4 "API Read Access Token" (a JWT).
 export function createTmdb(key) {
@@ -34,7 +40,7 @@ export function createTmdb(key) {
   // OTT news is about recent films, not the famous namesake from decades ago.
   function score(result, { title, language, year, type, refYear }) {
     const names = type === 'series' ? [result.name, result.original_name] : [result.title, result.original_title];
-    const target = normalizeTitle(title);
+    const target = normalizeTitle(searchTitle({ title, type }));
     const norm = names.filter(Boolean).map(normalizeTitle);
     let s = 0;
     if (norm.includes(target)) s += 4;
@@ -58,7 +64,7 @@ export function createTmdb(key) {
     const yearParam = query.type === 'series' ? 'first_air_date_year' : 'year';
     const attempts = query.year ? [{ [yearParam]: query.year }, {}] : [{}];
     for (const extra of attempts) {
-      const { results = [] } = await get(path, { query: query.title, region: 'IN', ...extra });
+      const { results = [] } = await get(path, { query: searchTitle(query), region: 'IN', ...extra });
       const best = results
         .map((r) => ({ r, s: score(r, query) }))
         .filter((x) => x.s >= 4)

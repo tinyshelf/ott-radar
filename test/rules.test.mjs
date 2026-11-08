@@ -74,6 +74,79 @@ test('round-up with "Where to watch / Streaming Date" blocks skips theatrical da
   assert.deepEqual(varam.map((f) => [f.platform, f.date, f.type]), [['jiohotstar', '2026-10-22', 'series']]);
 });
 
+test('round-up with a heading per title, a blurb, then release fields', () => {
+  const d = compileDictionary([
+    { title: 'Dilwali Diwali', language: 'hi', type: 'movie' },
+    { title: 'Haiwaan', language: 'hi', type: 'movie' },
+    { title: 'Yaga', language: 'en', type: 'series' },
+  ]);
+  const facts = extractFromArticle(article('New OTT Releases This Diwali Weekend (Nov 6-8, 2026)', [
+    'Here are 11 movies and shows releasing on OTT platforms between November 5 and 8, 2026.',
+    '1. Dilwali Diwali',
+    'Diwali reunions rarely go to plan, and Dilwali Diwali builds its family drama around coming home. Directed by Ritesh Menon, it follows a young man caught in family expectations.',
+    'Release date: November 5, 2026',
+    'Where to watch: Netflix',
+    '2. Campus Drivers',
+    'A French romance set at a university, it was a hit in theatres on October 2.',
+    'Release date: November 6, 2026',
+    'Where to watch: Prime Video',
+    '3. Haiwaan',
+    'Akshay Kumar and Saif Ali Khan reunite in Haiwaan, a Hindi crime thriller directed by Priyadarshan.',
+    'Release Date: November 6, 2026 Platform: SonyLIV',
+    '4. Yaga',
+    'Hudson Williams stars in this folklore horror series.',
+  ].join('\n'), '2026-11-05T06:00:00Z'), d, '2026-11-05');
+  assert.deepEqual(pick(facts, 'Dilwali Diwali').map((f) => [f.platform, f.date]), [['netflix', '2026-11-05']]);
+  assert.deepEqual(pick(facts, 'Haiwaan').map((f) => [f.platform, f.date]), [['sonyliv', '2026-11-06']]);
+  // Campus Drivers is not a known title, so its block must not leak into its neighbours.
+  assert.deepEqual(pick(facts, 'Yaga'), []);
+  assert.equal(facts.length, 2);
+});
+
+test('round-up with "Title – Platform" headings and the date in the blurb', () => {
+  const d = compileDictionary([{ title: 'Haiwaan', language: 'hi' }, { title: 'Campus Drivers', language: 'fr' }]);
+  const facts = extractFromArticle(article('What to watch on OTT this long weekend: 11 new movies and shows', [
+    'Haiwaan – SonyLIV',
+    'Starring Akshay Kumar and Saif Ali Khan, Haiwaan is a Hindi crime thriller directed by Priyadarshan. The film will begin streaming on SonyLIV on November 6, 2026.',
+    'Campus Drivers – Amazon Prime Video',
+    'Based on a bestselling novel, Campus Drivers is a romantic drama set around university life. The series will be available from November 6.',
+  ].join('\n'), '2026-11-04T06:00:00Z'), d, '2026-11-04');
+  assert.deepEqual(pick(facts, 'Haiwaan').map((f) => [f.platform, f.date]), [['sonyliv', '2026-11-06']]);
+  assert.deepEqual(pick(facts, 'Campus Drivers').map((f) => [f.platform, f.date]), [['prime-video', '2026-11-06']]);
+});
+
+test('heading with a subtitle the dictionary lacks, and "OTT Release :" lines', () => {
+  const d = compileDictionary([{ title: 'The Vvaan', language: 'hi' }, { title: 'Ramba Oorvasi Menaka', language: 'te' }]);
+  const facts = extractFromArticle(article('New Telugu and Hindi OTT Releases This Week', [
+    'The Vvaan: Force of the Forest',
+    'Sidharth Malhotra stars in a fantasy thriller rooted in folklore and set in a forbidden forest.',
+    'OTT Release : November 6, 2026 – Prime Video',
+    'Ramba Oorvasi Menaka',
+    'Allari Naresh plays a young man whose childhood wish comes true when three celestial nymphs descend to earth.',
+    'OTT Release : Amazon Prime Video - September 25',
+    'Verdict : A breezy entertainer for uncomplicated fun.',
+  ].join('\n'), '2026-11-05T06:00:00Z'), d, '2026-11-05');
+  assert.deepEqual(facts.map((f) => [f.title, f.platform, f.date]), [
+    ['The Vvaan', 'prime-video', '2026-11-06'],
+    ['Ramba Oorvasi Menaka', 'prime-video', '2026-09-25'],
+  ]);
+});
+
+test('links to other stories are not headings, and list items do not borrow from the next line', () => {
+  const d = compileDictionary([
+    { title: 'The Paradise' }, { title: 'Dorothy' }, { title: 'Sumo Didi' }, { title: 'I Play Rocky' }, { title: "I'm Game" },
+  ]);
+  const facts = extractFromArticle(article('Best OTT Releases This Week', [
+    'Paradise to Dorothy, Sumo Didi: Best OTT Releases This Week',
+    'SonyLIV is streaming Haiwaan this weekend, featuring Saif Ali Khan and Akshay Kumar.',
+    'Theatrical releases to book tickets for: Ramayana, I Play Rocky, Godzilla Minus Zero And More.',
+    "5. I'm Game",
+    'Release date: November 6, 2026',
+    'Where to watch: JioHotstar',
+  ].join('\n'), '2026-11-05T06:00:00Z'), d, '2026-11-05');
+  assert.deepEqual(facts.map((f) => [f.title, f.platform, f.date]), [["I'm Game", 'jiohotstar', '2026-11-06']]);
+});
+
 test('glued table rows and hedged dates', () => {
   const facts = extractFromArticle(article('This Week and Next Week OTT Releases',
     'Aaru AanugalManoramaMAXStreaming from 23 October 2026Siva Murali. DhoomakethuNetflixStreaming from 23 October 2026Sajin Gopu. Avarachan & SonsNetflixExpected 30 October 2026 – Not ConfirmedBiju Menon'), dict, TODAY);

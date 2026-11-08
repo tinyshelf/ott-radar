@@ -4,6 +4,7 @@ import { platformId } from '../scripts/lib/platforms.mjs';
 import { parseRss } from '../scripts/lib/rss.mjs';
 import { extractArticleText, normalizeTitle } from '../scripts/lib/text.mjs';
 import { RELEVANT } from '../scripts/lib/sources.mjs';
+import { searchTitle } from '../scripts/lib/tmdb.mjs';
 
 test('platformId maps aliases and TMDB provider names', () => {
   assert.equal(platformId('Amazon Prime Video'), 'prime-video');
@@ -52,6 +53,28 @@ test('extractArticleText paragraph fallback ignores <path> and other p-prefixed 
   assert.equal(extractArticleText(html), 'Dhoomakethu begins streaming on Netflix from October 23, 2026, after its theatrical run.');
 });
 
+test('extractArticleText keeps round-up headings that JSON-LD articleBody leaves out', () => {
+  const blurb = 'Diwali reunions rarely go to plan, and this family drama builds its story around coming home for the festival.';
+  const thriller = 'Akshay Kumar and Saif Ali Khan reunite in a Hindi crime thriller directed by Priyadarshan.';
+  const body = `This Diwali weekend brings eleven new OTT releases across languages and genres. ${blurb} Release date: November 5, 2026Where to watch: Netflix.${thriller} Read more.`;
+  const html = `<script type="application/ld+json">{"@type":"NewsArticle","articleBody":${JSON.stringify(body)}}</script>
+    <p>This Diwali weekend brings eleven new OTT releases across languages and genres.</p>
+    <h2>1. Dilwali Diwali</h2><p>${blurb}</p>
+    <p><strong>Release date:</strong> November 5, 2026</p><p><strong>Where to watch:</strong> Netflix</p>
+    <h2>2. Haiwaan – SonyLIV</h2><p>${thriller}</p>
+    <h2>Related Stories</h2>`;
+  assert.equal(extractArticleText(html), [
+    'This Diwali weekend brings eleven new OTT releases across languages and genres.',
+    '1. Dilwali Diwali', blurb, 'Release date: November 5, 2026', 'Where to watch: Netflix.',
+    '2. Haiwaan – SonyLIV', `${thriller} Read more.`,
+  ].join('\n'));
+});
+
+test('extractArticleText paragraph fallback keeps short bold list items', () => {
+  const html = '<p>There are a total of 16 movies or shows released this weekend on six streaming platforms.</p><p><strong>6. Haiwaan – SonyLIV</strong></p><p>Akshay Kumar and Saif Ali Khan star in this crime thriller about a visually impaired man.</p><p><b>Follow Us</b></p>';
+  assert.equal(extractArticleText(html), 'There are a total of 16 movies or shows released this weekend on six streaming platforms.\n6. Haiwaan – SonyLIV\nAkshay Kumar and Saif Ali Khan star in this crime thriller about a visually impaired man.');
+});
+
 test('normalizeTitle collapses punctuation, articles and quotes', () => {
   assert.equal(normalizeTitle("'The Paradise'"), 'paradise');
   assert.equal(normalizeTitle('Kantara: Chapter 1'), 'kantara chapter 1');
@@ -62,4 +85,12 @@ test('RELEVANT keeps OTT headlines and drops unrelated ones', () => {
   assert.ok(RELEVANT.test('Immortal OTT release date confirmed'));
   assert.ok(RELEVANT.test('Dorothy to premiere on ZEE5 this Friday'));
   assert.ok(!RELEVANT.test('Udta Teer box office collection day 2'));
+});
+
+test('TMDB search drops the season from series titles', () => {
+  assert.equal(searchTitle({ title: 'Wednesday Season 3', type: 'series' }), 'Wednesday');
+  assert.equal(searchTitle({ title: 'The Terminal List season 2', type: 'series' }), 'The Terminal List');
+  assert.equal(searchTitle({ title: 'Dhindora S2', type: 'series' }), 'Dhindora');
+  assert.equal(searchTitle({ title: 'Season 2', type: 'series' }), 'Season 2');
+  assert.equal(searchTitle({ title: 'Jailer 2', type: 'movie' }), 'Jailer 2');
 });

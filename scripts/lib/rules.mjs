@@ -13,6 +13,7 @@ import { ROUNDUP } from './sources.mjs';
 
 const DAY_MS = 86400e3;
 const SCOPE_CHARS = 350;
+const BLOCK_CHARS = 1500;
 
 // ---------- platforms in free text ----------
 
@@ -385,7 +386,7 @@ function extractSingle(article, focus, dict, ref) {
 
 const LIST_GLUE = /^[\s,&;]*(?:and|or|&)?[\s\p{L}'’.-]{0,40}$/u;
 // Lines in "Title / Where to watch: X / Streaming Date: Y" style listings.
-const FIELD_LINE = /^\s*(?:\d+\.\s*)?(?:Where\s+to\s+(?:watch|stream)|(?:OTT\s+)?Platform|Streaming\s+(?:on|date|platform|partner)|(?:OTT\s+)?Release\s+date|Premiere\s+date|Languages?|Cast|Starring|Genre|Director|Directed\s+by|Runtime|Rating|Episodes|Available\s+on|Watch\s+on)\b/i;
+const FIELD_LINE = /^\s*(?:\d+\.\s*)?(?:(?:Where\s+to\s+(?:watch|stream)|(?:OTT\s+)?Platform|Streaming\s+(?:on|date|platform|partner)|(?:OTT\s+)?Release\s+date|Premiere\s+date|Languages?|Cast|Starring|Genre|Director|Directed\s+by|Runtime|(?:IMDb\s+)?Rating|Verdict|Episodes|Available\s+on|Watch\s+on)\b|OTT\s+Release\s*:)/i;
 const ABBREV = /(?:\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Dr|Mr|Mrs|Ms|St|Jr|Sr|No|Rs|vs)|\b\p{Lu})$/u;
 
 // End of the text that describes a title mention: its own sentence, plus any
@@ -412,6 +413,58 @@ function scopeEnd(text, from, limit) {
   return limit;
 }
 
+// "Prime Video's The Terminal List": a possessive platform belongs to what follows.
+const proseyPlatforms = (text) => findPlatforms(text).filter((p) => !/^['’]s\b/.test(text.slice(p.end, p.end + 3)));
+
+// A heading is a short line of its own: "1. Dilwali Diwali", "Haiwaan – SonyLIV",
+// "Fantasy drama: Pushpaka Vimanam". Field lines, sentences and a bare platform
+// name are not headings.
+function isHeading(line) {
+  const t = line.trim();
+  return !!t && t.length <= 90 && !/[.!?:]["”’)]?$/.test(t) && !FIELD_LINE.test(t)
+    && !findPlatforms(t).some((p) => p.end - p.start === t.length);
+}
+
+// A title heads its line when only a number or a short label comes before it, and
+// only a platform, date, language or season after it. "Paradise to Dorothy, Sumo
+// Didi: Best OTT Releases" is a link to another story, not a heading.
+const HEADING_LEAD = /^\s*(?:\d{1,2}[.)]\s*)?(?:[\p{L} ]{1,25}:\s*)?$/u;
+const HEADING_TAIL = /^(?:season|part|chapter|vol|S\d|\d{4}\b|Hindi|Tamil|Telugu|Malayalam|Kannada|English|Bengali|Marathi|Korean|Japanese|Spanish)/i;
+// A subtitle the dictionary lacks: "The Vvaan: Force of the Forest".
+const SUBTITLE = /^\s*(?::|\s[-–—])\s*(\p{Lu}[\p{L}'’]*(?:\s+(?:\p{Lu}[\p{L}'’]*|of|the|a|an|and|in|on|to|for)){0,5})(?=\s*$|\s*[-–—:(|,])/u;
+const NEWS_WORD = /\b(?:OTT|Releases?|Watch|Week|Weekend|Box|Office|Review|Trailer|Collection|Update|Date|Streaming|Best|Top|New)\b/;
+function titleHeads(lead, tail) {
+  if (!HEADING_LEAD.test(lead)) return false;
+  const sub = tail.match(SUBTITLE);
+  const t = (sub && !NEWS_WORD.test(sub[1]) ? tail.slice(sub[0].length) : tail).replace(/^[\s\-–—:,|([]+/, '');
+  return !t || HEADING_TAIL.test(t) || findPlatforms(t).some((p) => p.start === 0) || findDates(t, '2026-01-01').some((d) => d.start === 0);
+}
+
+// When a title heads a line, its details follow in a block (a blurb, then often
+// "Release date:" / "Where to watch:" lines) that runs to the next heading.
+// Returns the end of that block, or -1 when the mention is not a heading.
+function headingBlockEnd(text, start, end) {
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  const lineEnd = text.indexOf('\n', end);
+  if (lineEnd === -1 || !isHeading(text.slice(lineStart, lineEnd)) || !titleHeads(text.slice(lineStart, start), text.slice(end, lineEnd))) return -1;
+  const limit = Math.min(text.length, lineEnd + BLOCK_CHARS);
+  let i = lineEnd;
+  while (i < limit) {
+    const next = text.indexOf('\n', i + 1);
+    const nextEnd = next === -1 ? text.length : next;
+    if (isHeading(text.slice(i + 1, nextEnd))) break;
+    i = nextEnd;
+  }
+  return Math.min(i, limit);
+}
+
+// The sentence (or line) of `text` around [start, end).
+function sentenceAt(text, start, end) {
+  const from = Math.max(text.lastIndexOf('\n', start), ...['. ', '! ', '? '].map((p) => text.lastIndexOf(p, start))) + 1;
+  const to = text.slice(end).search(/[.!?](?:\s|$)|\n/);
+  return text.slice(from, to === -1 ? text.length : end + to + 1).trim();
+}
+
 function extractMulti(article, dict, ref) {
   const text = article.text || article.title;
   const mentions = findTitles(text, dict);
@@ -425,17 +478,35 @@ function extractMulti(article, dict, ref) {
     if (/\b(?:theat(?:re|er)s?|cinemas?|big\s+screens?)\b/i.test(firstSentence) && !/\b(?:OTT|stream\w*|digital\w*)\b/i.test(firstSentence) && !findPlatforms(firstSentence).length) {
       return { m, scope: firstSentence, next, platform: null, date: null, theatrical: true };
     }
-    // "Prime Video's The Terminal List": a possessive platform belongs to what follows.
-    const platforms = findPlatforms(scope).filter((p) => !/^['’]s\b/.test(scope.slice(p.end, p.end + 3)));
-    const dates = streamingDates(scope, ref, platforms);
-    return { m, scope, next, platform: platforms[0]?.id ?? null, date: dates[0] ?? null };
+    const platforms = proseyPlatforms(scope);
+    const s = { m, scope, next, platform: platforms[0]?.id ?? null, date: streamingDates(scope, ref, platforms)[0] ?? null };
+    const blockEnd = headingBlockEnd(text, m.start, m.end);
+    if (blockEnd !== -1 && (!s.platform || !s.date)) {
+      s.heading = true;
+      // Field lines speak for the title; failing that, the blurb's streaming sentence.
+      const block = deglue(text.slice(m.end, blockEnd));
+      const fields = block.split('\n').filter((l) => FIELD_LINE.test(l)).join('\n');
+      for (const part of [fields, block]) {
+        const ps = proseyPlatforms(part);
+        const d = s.date ? null : streamingDates(part, ref, ps)[0];
+        if (d) {
+          const evidence = part === fields ? fields : sentenceAt(part, d.start, d.end);
+          s.date = d;
+          s.scope += `\n${evidence}`;
+          s.platform ??= proseyPlatforms(evidence)[0]?.id ?? null;
+        }
+        s.platform ??= ps[0]?.id ?? null;
+      }
+    }
+    return s;
   });
 
   // "Gajab Raat, Dorothy and Sumo Didi land on October 23": list items borrow
-  // the platform/date of the item that ends the list.
+  // the platform/date of the item that ends the list, on the same line.
   for (let i = scopes.length - 1; i >= 0; i--) {
     const s = scopes[i];
-    if (s.theatrical || s.platform || s.date || !s.next || s.scope.length > 45 || !LIST_GLUE.test(s.scope)) continue;
+    if (s.heading || s.theatrical || s.platform || s.date || !s.next || s.scope.length > 45 || !LIST_GLUE.test(s.scope)) continue;
+    if (text.slice(s.m.end, s.next.start).includes('\n')) continue;
     const donor = scopes.find((o) => o.m === s.next);
     if (donor?.theatrical) s.theatrical = true;
     else if (donor && (donor.platform || donor.date)) Object.assign(s, { platform: donor.platform, date: donor.date, scope: donor.scope, borrowed: true });
