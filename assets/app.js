@@ -26,6 +26,8 @@ const state = {
   platform: store.get('platform', null),
   type: store.get('type', 'all'),
   hideRumored: store.get('hideRumored', false),
+  sort: store.get('sort', 'date'),
+  minImdb: store.get('minImdb', 0),
   saved: new Set(store.get('saved', [])),
   limit: PAGE,
   open: new Set(),
@@ -81,6 +83,7 @@ function outGroup(date) {
 function matchesFilters(r) {
   if (state.type !== 'all' && r.type !== state.type) return false;
   if (state.lang !== 'all' && r.language !== state.lang) return false;
+  if (state.minImdb && !(r.imdb?.rating >= state.minImdb)) return false;
   if (state.q) {
     const hay = [r.title, r.original_title, ...(r.cast ?? []), r.director, ...r.streams.map((s) => platformName(s))]
       .filter(Boolean).join(' ').toLowerCase();
@@ -113,7 +116,9 @@ function buildView() {
     const focus = streams.filter((s) => isOut(s) === wantOut);
     if (!focus.length) continue;
     if (wantOut) {
-      const latest = focus.map((s) => s.date?.length === 10 ? s.date : s.first_seen).sort().pop();
+      // A platform JustWatch lists today doesn't make an older release new.
+      const days = focus.map((s) => s.date).filter((d) => d?.length === 10);
+      const latest = (days.length ? days : focus.map((s) => s.first_seen)).sort().pop();
       rows.push({ release: r, focus, sortKey: latest, group: outGroup(latest) });
     } else {
       const first = focus[0];
@@ -122,13 +127,27 @@ function buildView() {
   }
 
   const desc = state.tab === 'out';
-  rows.sort((a, b) => {
-    const g = compareGroups(a.group.key, b.group.key, desc);
-    if (g) return g;
-    const d = desc ? b.sortKey.localeCompare(a.sortKey) : a.sortKey.localeCompare(b.sortKey);
-    return d || a.release.title.localeCompare(b.release.title);
-  });
+  const byDate = (a, b) => (desc ? b.sortKey.localeCompare(a.sortKey) : a.sortKey.localeCompare(b.sortKey))
+    || a.release.title.localeCompare(b.release.title);
+  if (state.sort === 'imdb') {
+    for (const row of rows) {
+      row.score = imdbScore(row.release.imdb);
+      row.group = row.score == null ? { key: 'b', label: 'No IMDb rating yet' } : { key: 'a', label: 'By IMDb rating' };
+    }
+    return rows.sort((a, b) => a.group.key.localeCompare(b.group.key) || (b.score ?? 0) - (a.score ?? 0) || byDate(a, b));
+  }
+  rows.sort((a, b) => compareGroups(a.group.key, b.group.key, desc) || byDate(a, b));
   return rows;
+}
+
+// IMDb's weighted rating: few votes pull a rating towards a typical 6.5, so a 9.5
+// from 500 votes doesn't outrank an 8.1 from 17,000.
+const IMDB_PRIOR_VOTES = 1000;
+const IMDB_TYPICAL = 6.5;
+function imdbScore(imdb) {
+  if (!imdb?.rating) return null;
+  const v = imdb.votes ?? 0;
+  return (v * imdb.rating + IMDB_PRIOR_VOTES * IMDB_TYPICAL) / (v + IMDB_PRIOR_VOTES);
 }
 
 // Group keys: single letters ("This week", "Next/Last week") come first, then
@@ -229,7 +248,8 @@ function card({ release: r, focus }) {
     poster.textContent = r.title.replace(/^(the|a|an)\s+/i, '').slice(0, 1).toUpperCase();
   }
   $('.title', node).append(r.title);
-  if (r.year) $('.title', node).append(el('span', { class: 'yr' }, ` (${r.year})`));
+  // A series' year is its first season's, which makes a new season look old.
+  if (r.year && r.type !== 'series') $('.title', node).append(el('span', { class: 'yr' }, ` (${r.year})`));
   $('.meta', node).textContent = [DATA.languages[r.language] ?? r.language?.toUpperCase(), r.type === 'series' ? 'Series' : 'Movie', ...(r.genres ?? []).slice(0, 2)]
     .filter(Boolean).join(' · ');
   if (r.imdb?.rating) {
@@ -327,6 +347,8 @@ function renderChips() {
   );
 
   for (const b of $('#type-seg').children) b.setAttribute('aria-pressed', String(b.dataset.type === state.type));
+  for (const b of $('#sort-seg').children) b.setAttribute('aria-pressed', String(b.dataset.sort === state.sort));
+  for (const b of $('#imdb-seg').children) b.setAttribute('aria-pressed', String(Number(b.dataset.min) === state.minImdb));
   $('#hide-rumored').checked = state.hideRumored;
   for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === state.tab));
 }
@@ -355,6 +377,12 @@ function wire() {
   }
   for (const b of $('#type-seg').children) {
     b.addEventListener('click', () => { state.type = b.dataset.type; store.set('type', state.type); render(); });
+  }
+  for (const b of $('#sort-seg').children) {
+    b.addEventListener('click', () => { state.sort = b.dataset.sort; store.set('sort', state.sort); render(); });
+  }
+  for (const b of $('#imdb-seg').children) {
+    b.addEventListener('click', () => { state.minImdb = Number(b.dataset.min); store.set('minImdb', state.minImdb); render(); });
   }
   $('#hide-rumored').addEventListener('change', (e) => { state.hideRumored = e.target.checked; store.set('hideRumored', state.hideRumored); render(); });
   let t;

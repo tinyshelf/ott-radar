@@ -17,7 +17,7 @@ import { refreshDictionary } from './lib/dictionary.mjs';
 import { createTmdb, MATCH_VERSION } from './lib/tmdb.mjs';
 import { fetchRatings } from './lib/imdb.mjs';
 import { mapPool } from './lib/http.mjs';
-import { buildReleases, factToClaim, matchKey, tmdbClaims } from './lib/merge.mjs';
+import { buildReleases, factToClaim, isCurrent, matchKey, tmdbClaims } from './lib/merge.mjs';
 import { PLATFORMS } from './lib/platforms.mjs';
 import { LANGUAGES, WANTED } from './lib/languages.mjs';
 
@@ -210,7 +210,7 @@ async function main() {
     .filter(([key, d]) => referenced.has(key) || (d.year ?? 0) >= minYear)
     .flatMap(([, d]) => tmdbClaims(d));
   const releases = buildReleases([...news, ...derived], { ...cache, ratings: imdb.ratings }, today)
-    .filter((r) => WANTED.includes(r.language));
+    .filter((r) => WANTED.includes(r.language) && isCurrent(r, today));
   console.log(`Built ${releases.length} releases from ${news.length} news claims + ${derived.length} TMDB claims`);
 
   for (const [link, day] of Object.entries(seen)) if (day < addDays(today, -30)) delete seen[link];

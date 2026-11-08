@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReleases, cleanDate, factToClaim, resolveStream, tmdbClaims } from '../scripts/lib/merge.mjs';
+import { buildReleases, cleanDate, factToClaim, isCurrent, resolveStream, tmdbClaims } from '../scripts/lib/merge.mjs';
 
 const TODAY = '2026-10-25';
 let n = 0;
@@ -174,6 +174,28 @@ test('a future streaming date is not available, whatever JustWatch or a "now str
   assert.equal(month.available, false);
   const past = resolveStream([claim({ date: '2026-10-23' }), justWatch], TODAY);
   assert.equal(past.available, true);
+});
+
+test('isCurrent keeps upcoming and recent releases, drops old OTT dates and catalogue-only listings', () => {
+  const stream = (over) => ({ platform: 'netflix', date: null, precision: null, available: false, first_seen: '2026-10-20', sources: [{ outlet: 'A' }], ...over });
+  const rel = (...streams) => ({ title: 'X', streams });
+  // Today is 2026-10-25, so the 90-day window starts on 2026-07-27.
+  assert.equal(isCurrent(rel(stream({ date: '2026-11-20', precision: 'day' })), TODAY), true);
+  assert.equal(isCurrent(rel(stream({ date: '2026-08-14', precision: 'day', available: true })), TODAY), true);
+  assert.equal(isCurrent(rel(stream({ date: '2025-10-17', precision: 'day', available: true })), TODAY), false);
+  assert.equal(isCurrent(rel(stream({ date: '2026-07', precision: 'month' })), TODAY), true);
+  // Old Netflix date plus a JustWatch-only listing on a second platform: still old.
+  assert.equal(isCurrent(rel(
+    stream({ date: '2026-01-30', precision: 'day', available: true }),
+    stream({ platform: 'jiohotstar', available: true, first_seen: '2026-10-24', sources: [] }),
+  ), TODAY), false);
+  // Undated news report counts by when it was first seen.
+  assert.equal(isCurrent(rel(stream({ available: true, first_seen: '2026-10-23' })), TODAY), true);
+  assert.equal(isCurrent(rel(stream({ available: true, first_seen: '2026-06-01' })), TODAY), false);
+  // JustWatch alone: a recent film with no OTT date yet counts, back catalogue doesn't.
+  const justWatch = stream({ available: true, first_seen: '2026-10-24', sources: [] });
+  assert.equal(isCurrent({ ...rel(justWatch), year: 2026 }, TODAY), true);
+  assert.equal(isCurrent({ ...rel(justWatch), year: 2019 }, TODAY), false);
 });
 
 test('unknown platforms are kept with their display name', () => {

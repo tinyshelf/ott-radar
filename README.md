@@ -32,6 +32,8 @@ A date counts only when the closest cue word is about streaming, not theatres, a
 - drops platforms that only a small minority of outlets mention, which are usually a neighbouring title's platform picked up by mistake
 - labels the result **Confirmed** (official, 2+ outlets agree, or JustWatch shows it streaming), **Reported** (one outlet), or **Rumoured** (only hedged reports)
 
+The site lists releases that are upcoming or came out on OTT in the last 90 days. A title JustWatch shows as streaming, with no news about it, counts only if it is from this year or last. The list can be sorted and filtered by IMDb rating; the sort weights each rating by its vote count, as IMDb's own charts do.
+
 Rule-based extraction makes mistakes that an AI model wouldn't. The labels and the cross-checking contain most of them: a wrong fact from one article stays "Reported", while popular titles end up backed by 10–30 outlets. Tap any card to see the source articles.
 
 ## Setup

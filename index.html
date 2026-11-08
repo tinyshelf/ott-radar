@@ -39,6 +39,18 @@
       </div>
       <label class="toggle"><input type="checkbox" id="hide-rumored"> Hide rumours</label>
     </div>
+    <div class="row">
+      <div class="seg" id="sort-seg" aria-label="Sort by">
+        <button data-sort="date" aria-pressed="true">Date</button>
+        <button data-sort="imdb">IMDb</button>
+      </div>
+      <div class="seg" id="imdb-seg" aria-label="Minimum IMDb rating">
+        <button data-min="0" aria-pressed="true">Any rating</button>
+        <button data-min="6">6+</button>
+        <button data-min="7">7+</button>
+        <button data-min="8">8+</button>
+      </div>
+    </div>
   </section>
 
   <main id="list" aria-live="polite"></main>

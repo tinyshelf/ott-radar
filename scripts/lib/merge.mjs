@@ -7,6 +7,8 @@ const DAY = 86400e3;
 // title+platform, are ignored when picking a date (handles postponements).
 const RECENCY_WINDOW_DAYS = 21;
 const IMG = 'https://image.tmdb.org/t/p/w342';
+// "Out now" covers OTT releases from this many days back.
+const OUT_NOW_DAYS = 90;
 
 const DATE_RE = /^\d{4}-\d{2}(-\d{2})?$/;
 
@@ -155,6 +157,19 @@ function mostCommon(values) {
   const counts = new Map();
   for (const v of values) if (v != null) counts.set(v, (counts.get(v) ?? 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+// The site lists upcoming and recent releases. A release stays while one of its
+// streams is upcoming or came out in the last OUT_NOW_DAYS. A stream without a
+// date counts by when the news first reported it. JustWatch alone lists whole back
+// catalogues, so it counts only for a film from this year or last with no OTT date.
+export function isCurrent(release, today, days = OUT_NOW_DAYS) {
+  const since = new Date(Date.parse(`${today}T00:00:00Z`) - days * DAY).toISOString().slice(0, 10);
+  const dated = release.streams.filter((s) => s.date);
+  if (dated.some((s) => (s.date.length === 7 ? s.date >= since.slice(0, 7) : s.date >= since))) return true;
+  const undated = release.streams.filter((s) => !s.date && s.first_seen >= since);
+  if (undated.some((s) => s.sources.length > 0)) return true;
+  return !dated.length && (release.year ?? 0) >= Number(today.slice(0, 4)) - 1 && undated.length > 0;
 }
 
 // Groups all claims into releases for the site.
