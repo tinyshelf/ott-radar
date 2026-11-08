@@ -45,7 +45,7 @@ Rule-based extraction makes mistakes that an AI model wouldn't. The labels and t
 
 The optional repo variable `MAX_ARTICLES` (default 100) caps how many articles each run reads.
 
-**Backfilling older news:** Actions → *Update data and deploy* → *Run workflow* has a `backfill_days` box. Enter e.g. `60` to also read the last 60 days of news (up to 500 articles, about 15 minutes). Normal runs leave it at 0.
+**Backfilling older news:** Actions → *Update data and deploy* → *Run workflow* has a `backfill_days` box. Enter e.g. `60` to also read the last 60 days of news (up to 1500 articles). Normal runs leave it at 0. Google stops resolving its news links after about 40 per run and stays blocked for well over 10 minutes, so a backfill spends those on round-ups spread across every week, and reads the remaining single-title stories from their headlines alone. Running it again a few hours later reads more of the round-ups.
 
 ## Local use
 

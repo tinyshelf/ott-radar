@@ -30,7 +30,7 @@ const COLLECT_TO = flag('collect');
 const DRY_FROM = flag('dry');
 const FROM = flag('from');
 const BACKFILL_DAYS = Number(flag('backfill') || process.env.BACKFILL_DAYS || 0);
-const MAX_ARTICLES = Number(process.env.MAX_ARTICLES || (BACKFILL_DAYS ? 500 : 100));
+const MAX_ARTICLES = Number(process.env.MAX_ARTICLES || (BACKFILL_DAYS ? 1500 : 100));
 
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400e3).toISOString().slice(0, 10);
@@ -88,7 +88,7 @@ async function stepNews(claims, seen, titles) {
     console.log(`News: ${articles.length} unseen articles from ${FROM}`);
   } else {
     console.log(`News: collecting headlines${BACKFILL_DAYS ? ` (backfilling ${BACKFILL_DAYS} days)` : ''}`);
-    const headlines = selectHeadlines(await collectHeadlines(seen, { backfillDays: BACKFILL_DAYS }), MAX_ARTICLES);
+    const headlines = selectHeadlines(await collectHeadlines(seen, { backfillDays: BACKFILL_DAYS }), MAX_ARTICLES, { spread: BACKFILL_DAYS > 0 });
     console.log(`  ${headlines.length} new relevant headlines`);
     articles = (await fetchArticles(headlines)).filter(Boolean);
   }
@@ -100,7 +100,13 @@ async function stepNews(claims, seen, titles) {
 
   const known = new Set(claims.map((c) => c.id));
   let added = 0;
-  articles = articles.filter((a) => !a.retry);
+  // Rate-limited articles normally wait for the next run. Google's limit lasts
+  // longer than a backfill, so there old single-title stories are read from the
+  // headline alone, which usually names the title and platform. Round-ups need
+  // their text and are left unread.
+  const fromHeadline = BACKFILL_DAYS ? articles.filter((a) => a.retry && !a.roundup).length : 0;
+  articles = articles.filter((a) => !a.retry || (BACKFILL_DAYS && !a.roundup));
+  if (fromHeadline) console.log(`  ${fromHeadline} rate-limited articles read from the headline only`);
   for (const fact of extractAll(articles, buildDictionary(titles, claims, articles))) {
     const claim = factToClaim(fact, today);
     if (!claim.title || known.has(claim.id)) continue;

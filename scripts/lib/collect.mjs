@@ -55,12 +55,29 @@ export async function collectHeadlines(seen, { now = new Date(), backfillDays = 
   return [...byKey.values()].sort((a, b) => String(b.published).localeCompare(String(a.published)));
 }
 
+// Round-robin over weeks, newest week first, keeping each week's own order.
+function interleaveWeeks(headlines) {
+  const weeks = new Map();
+  for (const h of headlines) {
+    const week = Math.floor(Date.parse(h.published) / (7 * 86400e3)) || 0;
+    if (!weeks.has(week)) weeks.set(week, []);
+    weeks.get(week).push(h);
+  }
+  const queues = [...weeks.entries()].sort((a, b) => b[0] - a[0]).map(([, hs]) => hs);
+  const out = [];
+  for (let i = 0; out.length < headlines.length; i++) for (const q of queues) if (i < q.length) out.push(q[i]);
+  return out;
+}
+
 // Round-ups mostly repeat the current week, while single-title stories carry the
 // upcoming dates, so round-ups get at most a third of each run's budget.
-export function selectHeadlines(headlines, max) {
-  const roundups = headlines.filter((h) => h.roundup).slice(0, Math.ceil(max / 3));
-  const singles = headlines.filter((h) => !h.roundup).slice(0, max - roundups.length);
-  const extra = headlines.filter((h) => h.roundup).slice(roundups.length, roundups.length + max - roundups.length - singles.length);
+// With `spread` (backfills), each week gets its turn: Google stops resolving links
+// after a few dozen, and newest-first order would spend them all on recent weeks.
+export function selectHeadlines(headlines, max, { spread = false } = {}) {
+  const order = spread ? interleaveWeeks : (hs) => hs;
+  const roundups = order(headlines.filter((h) => h.roundup)).slice(0, Math.ceil(max / 3));
+  const singles = order(headlines.filter((h) => !h.roundup)).slice(0, max - roundups.length);
+  const extra = order(headlines.filter((h) => h.roundup)).slice(roundups.length, roundups.length + max - roundups.length - singles.length);
   return [...roundups, ...singles, ...extra];
 }
 

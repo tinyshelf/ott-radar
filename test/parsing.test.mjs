@@ -5,6 +5,7 @@ import { parseRss } from '../scripts/lib/rss.mjs';
 import { extractArticleText, normalizeTitle } from '../scripts/lib/text.mjs';
 import { RELEVANT } from '../scripts/lib/sources.mjs';
 import { searchTitle } from '../scripts/lib/tmdb.mjs';
+import { selectHeadlines } from '../scripts/lib/collect.mjs';
 
 test('platformId maps aliases and TMDB provider names', () => {
   assert.equal(platformId('Amazon Prime Video'), 'prime-video');
@@ -93,4 +94,12 @@ test('TMDB search drops the season from series titles', () => {
   assert.equal(searchTitle({ title: 'Dhindora S2', type: 'series' }), 'Dhindora');
   assert.equal(searchTitle({ title: 'Season 2', type: 'series' }), 'Season 2');
   assert.equal(searchTitle({ title: 'Jailer 2', type: 'movie' }), 'Jailer 2');
+});
+
+test('backfills spread the article budget over every week, round-ups first', () => {
+  const h = (id, day, roundup = false) => ({ id, published: `2026-${day}T10:00:00Z`, roundup });
+  // Newest first, as collectHeadlines returns them: three recent stories, one each from older weeks.
+  const heads = [h('n1', '11-07'), h('n2', '11-06'), h('r1', '11-05', true), h('n3', '11-05'), h('s1', '10-15'), h('r2', '09-10', true), h('a1', '08-20')];
+  assert.deepEqual(selectHeadlines(heads, 4).map((x) => x.id), ['r1', 'r2', 'n1', 'n2']);
+  assert.deepEqual(selectHeadlines(heads, 4, { spread: true }).map((x) => x.id), ['r1', 'r2', 'n1', 's1']);
 });
