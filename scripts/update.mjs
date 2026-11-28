@@ -17,9 +17,10 @@ import { refreshDictionary } from './lib/dictionary.mjs';
 import { createTmdb, MATCH_VERSION } from './lib/tmdb.mjs';
 import { fetchRatings } from './lib/imdb.mjs';
 import { mapPool } from './lib/http.mjs';
-import { buildReleases, factToClaim, isCurrent, matchKey, tmdbClaims } from './lib/merge.mjs';
+import { buildReleases, factToClaim, isCurrent, matchKey, MIN_CINEMA_GAP_DAYS, movedIds, tmdbClaims } from './lib/merge.mjs';
 import { PLATFORMS } from './lib/platforms.mjs';
 import { LANGUAGES, WANTED } from './lib/languages.mjs';
+import { normalizeTitle } from './lib/text.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = path.join(ROOT, 'data');
@@ -153,10 +154,10 @@ async function stepTmdb(claims, cache) {
     console.warn(`  ! TMDB discover failed: ${err.message}`);
   }
 
-  // Entries cached before IMDb ids were collected have no imdb_id key at all.
+  // Entries cached before IMDb ids or cinema dates were collected lack those keys.
   const stale = [...wanted].filter((k) => {
     const d = cache.details[k];
-    return !d || d.imdb_id === undefined || d.fetched_at.slice(0, 10) < addDays(today, -2);
+    return !d || d.imdb_id === undefined || d.cinema === undefined || d.fetched_at.slice(0, 10) < addDays(today, -2);
   }).slice(0, 400);
   await mapPool(stale, 4, async (k) => {
     const [type, id] = k.split(':');
@@ -177,6 +178,22 @@ async function stepImdb(cache, imdb) {
     console.warn(`  ! IMDb ratings: ${err.message}; keeping previous ratings`);
     return imdb;
   }
+}
+
+// Prints what the accuracy rules left out, so a bad rule shows up in the run log.
+function printAudit(audit, releases) {
+  const list = (xs) => [...new Set(xs)].slice(0, 25).join('; ') + (new Set(xs).size > 25 ? '; …' : '');
+  if (audit.implausible.length) {
+    console.log(`  ignored ${audit.implausible.length} streaming dates earlier than ${MIN_CINEMA_GAP_DAYS} days after the cinema release: `
+      + list(audit.implausible.map((x) => `${x.title} (${x.platform ?? 'no platform'} ${x.date ?? 'now streaming'}, cinemas ${x.cinema})`)));
+  }
+  if (audit.unverified.length) {
+    console.log(`  left out ${audit.unverified.length} unverified titles (no TMDB match, not a known title, one outlet): ${list(audit.unverified)}`);
+  }
+  const seen = new Map();
+  for (const r of releases) seen.set(normalizeTitle(r.title), (seen.get(normalizeTitle(r.title)) ?? 0) + 1);
+  const dupes = [...seen].filter(([, n]) => n > 1).map(([t]) => t);
+  if (dupes.length) console.log(`  titles listed more than once: ${list(dupes)}`);
 }
 
 async function main() {
@@ -215,9 +232,14 @@ async function main() {
   const derived = Object.entries(cache.details)
     .filter(([key, d]) => referenced.has(key) || (d.year ?? 0) >= minYear)
     .flatMap(([, d]) => tmdbClaims(d));
-  const releases = buildReleases([...news, ...derived], { ...cache, ratings: imdb.ratings }, today)
+  const known = new Set(titles.entries.map((e) => normalizeTitle(e.title)));
+  const audit = { implausible: [], unverified: [] };
+  const releases = buildReleases([...news, ...derived], { ...cache, ratings: imdb.ratings, known, audit }, today)
     .filter((r) => WANTED.includes(r.language) && isCurrent(r, today));
   console.log(`Built ${releases.length} releases from ${news.length} news claims + ${derived.length} TMDB claims`);
+  audit.unverified = audit.unverified.filter((r) => WANTED.includes(r.language) && isCurrent(r, today)).map((r) => r.title);
+  printAudit(audit, releases);
+  const moved = movedIds(await readJson('releases.json', { releases: [] }), releases);
 
   for (const [link, day] of Object.entries(seen)) if (day < addDays(today, -30)) delete seen[link];
   claims.sort((a, b) => a.seen.localeCompare(b.seen) || a.id.localeCompare(b.id));
@@ -229,7 +251,7 @@ async function main() {
   await fs.writeFile(path.join(DATA, 'imdb.json'), JSON.stringify(imdb) + '\n');
   const platforms = Object.fromEntries(Object.entries(PLATFORMS).map(([id, p]) => [id, { name: p.name, color: p.color, url: p.url }]));
   const languages = Object.fromEntries(WANTED.map((l) => [l, LANGUAGES[l]]));
-  await writeLines('releases.json', { updated_at: new Date().toISOString(), today, platforms, languages }, 'releases', releases);
+  await writeLines('releases.json', { updated_at: new Date().toISOString(), today, platforms, languages, moved }, 'releases', releases);
 }
 
 main().catch((err) => {

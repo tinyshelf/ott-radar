@@ -8,12 +8,39 @@ export const INDIAN_LANGS = WANTED_INDIAN.join('|');
 export const WANTED_LANGS = WANTED.join('|');
 const INDIAN_SET = new Set(INDIAN_LANGS.split('|'));
 // Bump when matching rules change so cached matches are redone.
-export const MATCH_VERSION = 3;
+export const MATCH_VERSION = 4;
 
-// News names a season ("Wednesday Season 3"); TMDB lists the show once ("Wednesday").
+// News names a season ("Wednesday Season 3", "Aashram 4"); TMDB lists the show
+// once ("Wednesday").
 export function searchTitle({ title, type }) {
   if (type !== 'series') return title;
-  return title.replace(/\s+(?:season|S)\s*\d{1,2}\b.*$/i, '').trim() || title;
+  return title.replace(/\s+(?:season|S)\s*\d{1,2}\b.*$/i, '').replace(/(?<!\bseason)\s+\d{1,2}$/i, '').trim() || title;
+}
+
+// Scores a TMDB search result against a news title; 4+ is a match.
+// `refYear` (the year the news appeared) stands in for an unknown release year:
+// OTT news is about recent films, not the famous namesake from decades ago.
+export function scoreMatch(result, { title, language, year, type, refYear }) {
+  const names = type === 'series' ? [result.name, result.original_name] : [result.title, result.original_title];
+  const target = normalizeTitle(searchTitle({ title, type }));
+  const norm = names.filter(Boolean).map(normalizeTitle);
+  let s = 0;
+  // The full name counts too: a show can be called "Kanni 2" on TMDB.
+  if (norm.includes(target) || norm.includes(normalizeTitle(title))) s += 4;
+  else if (norm.some((n) => n.startsWith(target + ' ') || target.startsWith(n + ' '))) s += 1;
+  else return -1;
+  if (language ? result.original_language === language : INDIAN_SET.has(result.original_language)) s += 2;
+  const date = type === 'series' ? result.first_air_date : result.release_date;
+  const y = date ? Number(date.slice(0, 4)) : null;
+  if (year && y && Math.abs(y - year) <= 1) s += 2;
+  if (year && y && Math.abs(y - year) > 2) s -= 2;
+  if (!year && refYear && y) {
+    if (y >= refYear - 1 && y <= refYear + 1) s += 2;
+    // TMDB dates a series by its first season, so "Panchayat Season 5" news is
+    // about a show from 2020. Only a film that old is likely a namesake.
+    else if (y < refYear - 3 && type !== 'series') s -= 3;
+  }
+  return s + Math.min(result.popularity ?? 0, 50) / 100;
 }
 
 // Accepts either a v3 API key or a v4 "API Read Access Token" (a JWT).
@@ -36,28 +63,6 @@ export function createTmdb(key) {
     return res.json();
   }
 
-  // `refYear` (the year the news appeared) stands in for an unknown release year:
-  // OTT news is about recent films, not the famous namesake from decades ago.
-  function score(result, { title, language, year, type, refYear }) {
-    const names = type === 'series' ? [result.name, result.original_name] : [result.title, result.original_title];
-    const target = normalizeTitle(searchTitle({ title, type }));
-    const norm = names.filter(Boolean).map(normalizeTitle);
-    let s = 0;
-    if (norm.includes(target)) s += 4;
-    else if (norm.some((n) => n.startsWith(target + ' ') || target.startsWith(n + ' '))) s += 1;
-    else return -1;
-    if (language ? result.original_language === language : INDIAN_SET.has(result.original_language)) s += 2;
-    const date = type === 'series' ? result.first_air_date : result.release_date;
-    const y = date ? Number(date.slice(0, 4)) : null;
-    if (year && y && Math.abs(y - year) <= 1) s += 2;
-    if (year && y && Math.abs(y - year) > 2) s -= 2;
-    if (!year && refYear && y) {
-      if (y >= refYear - 1 && y <= refYear + 1) s += 2;
-      else if (y < refYear - 3) s -= 3;
-    }
-    return s + Math.min(result.popularity ?? 0, 50) / 100;
-  }
-
   // Finds the TMDB entry for a news title. Returns { id, type } or null.
   async function match(query) {
     const path = query.type === 'series' ? '/search/tv' : '/search/movie';
@@ -66,7 +71,7 @@ export function createTmdb(key) {
     for (const extra of attempts) {
       const { results = [] } = await get(path, { query: searchTitle(query), region: 'IN', ...extra });
       const best = results
-        .map((r) => ({ r, s: score(r, query) }))
+        .map((r) => ({ r, s: scoreMatch(r, query) }))
         .filter((x) => x.s >= 4)
         .sort((a, b) => b.s - a.s)[0];
       if (best) return { id: best.r.id, type: query.type };
@@ -85,13 +90,19 @@ export function createTmdb(key) {
         genres: (d.genres ?? []).map((g) => g.name),
         cast: (d.aggregate_credits?.cast ?? []).slice(0, 4).map((c) => c.name),
         director: (d.created_by ?? []).map((c) => c.name)[0] ?? null,
-        theatrical: null, digital: [],
+        theatrical: null, cinema: null, digital: [],
         providers: providersIN(d['watch/providers']),
       };
     }
     const d = await get(`/movie/${id}`, { append_to_response: 'release_dates,watch/providers,credits' });
-    const inDates = (d.release_dates?.results ?? []).find((r) => r.iso_3166_1 === 'IN')?.release_dates ?? [];
-    const theatrical = inDates.filter((r) => r.type === 3 || r.type === 2).map((r) => r.release_date.slice(0, 10)).sort()[0];
+    const countries = d.release_dates?.results ?? [];
+    const inDates = countries.find((r) => r.iso_3166_1 === 'IN')?.release_dates ?? [];
+    const day = (r) => r.release_date.slice(0, 10);
+    const theatrical = inDates.filter((r) => r.type === 3 || r.type === 2).map(day).sort()[0];
+    // A real cinema release: India's, else the earliest wide one anywhere. TMDB's
+    // primary release date can't stand in: for a direct-to-OTT film it is the
+    // streaming date.
+    const cinema = theatrical ?? countries.flatMap((c) => c.release_dates).filter((r) => r.type === 3).map(day).sort()[0];
     return {
       tmdb_id: id, type, imdb_id: d.imdb_id || null,
       title: d.title, original_title: d.original_title, language: d.original_language,
@@ -102,6 +113,7 @@ export function createTmdb(key) {
       cast: (d.credits?.cast ?? []).slice(0, 4).map((c) => c.name),
       director: (d.credits?.crew ?? []).find((c) => c.job === 'Director')?.name ?? null,
       theatrical: theatrical ?? (d.release_date || null),
+      cinema: cinema ?? null,
       digital: inDates.filter((r) => r.type === 4).map((r) => ({ date: r.release_date.slice(0, 10), note: r.note || null })),
       providers: providersIN(d['watch/providers']),
     };
