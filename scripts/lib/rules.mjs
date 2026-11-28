@@ -292,19 +292,38 @@ const HEADLINE_PATTERNS = [
 
 // Headline words around a title that aren't part of it: "OTT Alert: Anakapalli",
 // "Baththa Now Streaming", "Udta Teer Movie :", "Sigma: Reported".
-const TITLE_LEAD = /^(?:OTT\s+alert|alert)\s*[:|–-]\s*/i;
-const STATUS_TAIL = /\s+(?:(?:is\s+)?now\s+streaming|streaming|arrives|hits|lands|drops|(?:(?:movie|film)\s+)?watch\s+online|hindi\s+(?:dub(?:bed)?|version))$/i;
+const TITLE_LEAD = /^(?:OTT(?:\s+alert)?|alert)\s*[:|–-]\s*/i;
+const STATUS_TAIL = /\s+(?:(?:is\s+)?now\s+streaming|streaming|arrives|hits|lands|drops|(?:(?:movie|film)\s+)?watch\s+online)$/i;
+// "DNA Malayalam", "Scene Tamil Movie", "Obsession Hindi Dub".
+const LANG_TAIL = /\s+(?:hindi|tamil|telugu|malayalam|kannada|bengali|marathi|punjabi|english)(?:\s+(?:dub(?:bed)?|version|movie|film))?$/i;
+// Headline verbs: "Jailer 2 Makes", "The Third Murder released", "Hanuman Ansh To
+// Release", "Ranabaali Is Coming To Netflix", "Megaverse Moves Closer".
+const VERB_TAIL = /\s+(?:makes|release[sd]?|releasing|(?:all\s+)?(?:set\s+)?to\s+release|(?:moves|inches|edges)\s+closer|(?:is|are)\s+(?:coming|headed|heading|set|ready)\s+to\b.*)$/i;
+// "Ajay Devgn led Drishyam: The Conclusion", "Ajay Devgn-starrer Drishyam".
+const LED_LEAD = /^(?:\p{Lu}[\p{L}.]*\s+){0,2}\p{Lu}[\p{L}.]*(?:\s+|-)(?:[Ll]ed|[Ss]tarrer)\s+(?=[\p{Lu}\d‘'"“])/u;
+// "Tamil Debut Haiku", "Malayalam Thriller Pozhi".
+const GENRE_LEAD = /^(?:hindi|tamil|telugu|malayalam|kannada|bengali|marathi|punjabi|english|bollywood|tollywood|kollywood|mollywood|sandalwood)\s+(?:(?:debut|horror|thriller|action|crime|comedy|romantic|romance|family|drama|period|psychological|mystery|investigative|survival|courtroom|political|sci-fi|fantasy|film|movie|web\s+series|series)\s+)+(?=\S)/i;
 // "Udta Teer Movie :" but not "The Super Mario Galaxy Movie".
 const KIND_TAIL = /(?<!\bThe)\s+(?:movie|film)\s*:$/i;
 const HEDGE_SUBTITLE = /:\s*(?:potential|reported|expected|can|will|possible|likely|official|confirmed|final|big|latest)$/i;
-const NOT_TITLE = /^(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|today|tomorrow|tonight|halloween|diwali|christmas|new\s+year)$/i;
+const NOT_TITLE = /^(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|today|tomorrow|tonight|halloween|diwali|christmas|new\s+year|(?:this|next|last)\s+week(?:end)?)$/i;
 const COUNT_LEAD = /^\d+\s+(?:south|north|hindi|tamil|telugu|malayalam|kannada|english|new|best|top|upcoming)\b/i;
+// A round-up headline, not a title: "Aadarsha Kutumbam, Drishyam 3, and More",
+// "One in Theatres, Another".
+const LISTING = /(?:,|\s)\s*and\s+more$|\b(?:in|from)\s+(?:theat(?:re|er)s|cinemas)\b/i;
 
 // Cleans a title taken from a headline (or stored from an older run); null when
 // it is not a title at all: "Rs 800 Crore Hit, Yet", "From Theatres", "Netflix
 // October 30", "Akka to Obsession: 7".
 export function tidyTitle(raw) {
-  let t = String(raw ?? '').trim().replace(TITLE_LEAD, '').replace(/,\s*(?:starring|featuring|with)\b.*$/i, '');
+  let t = String(raw ?? '').trim();
+  // Film-profile pages: "Dalimb 2026 | Dalimb Hindi Movie: Release Date, Cast, …".
+  const piped = t.match(/^(.+?)\s*\|\s*(.+)$/);
+  if (piped) {
+    const name = piped[1].replace(/\s+(?:19|20)\d\d$/, '');
+    t = normalizeTitle(piped[2]).startsWith(normalizeTitle(name)) ? name : piped[1];
+  }
+  t = t.replace(TITLE_LEAD, '').replace(LED_LEAD, '').replace(GENRE_LEAD, '').replace(/,\s*(?:starring|featuring|with)\b.*$/i, '');
   // "Baththa on Netflix: Vijay Sethupathi" -> "Baththa".
   const on = findPlatforms(t).find((p) => /\s(?:now\s+)?on\s+$/i.test(t.slice(0, p.start)));
   if (on) t = t.slice(0, on.start).replace(/\s+(?:now\s+)?on\s+$/i, '');
@@ -312,9 +331,10 @@ export function tidyTitle(raw) {
   t = t.replace(/:[^:]*,.*$/, '');
   for (let prev = ''; prev !== t;) {
     prev = t;
-    t = t.replace(KIND_TAIL, '').replace(/[\s:,;–-]+$/, '').replace(STATUS_TAIL, '').replace(HEDGE_SUBTITLE, '');
+    t = t.replace(KIND_TAIL, '').replace(/[\s:,;–-]+$/, '').replace(STATUS_TAIL, '').replace(HEDGE_SUBTITLE, '')
+      .replace(LANG_TAIL, '').replace(VERB_TAIL, '');
   }
-  if (!t || NOT_TITLE.test(t) || COUNT_LEAD.test(t) || /:\s*\d+$/.test(t)) return null;
+  if (!t || NOT_TITLE.test(t) || COUNT_LEAD.test(t) || LISTING.test(t) || /:\s*\d+$/.test(t)) return null;
   if (/\b(?:crore|lakh)\b|^rs\.?\s/i.test(t) || /^(?:from\s+)?(?:theat(?:re|er)s?|cinemas?|big\s+screens?)$/i.test(t)) return null;
   // Nothing but platforms and dates.
   let rest = t;
@@ -337,7 +357,7 @@ export function headlineTitle(headline) {
       .replace(/^[‘'"“]+|[’'"”]+$/g, '').trim()
       .replace(/^(?:\p{Lu}[\p{L}.]*\s+){0,2}\p{Lu}[\p{L}.]*['’]s\s+(?=[\p{Lu}\d‘'"“])/u, '')
       .replace(/^[‘'"“]+|[’'"”]+$/g, '').trim()
-      .replace(/(?<!\bThe)\s+(?:movie|film|web\s*series|series)$/i, '').trim()
+      .replace(/(?<!\bThe)\s+(?:short\s+film|movie|film|web\s*series|series)$/i, '').trim()
       .replace(/(?:\s+(?:on|in|to|at|from|now|is|set|gets|and))+$/i, '').trim();
     t = tidyTitle(t);
     if (!t) return null;

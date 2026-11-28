@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReleases, cleanDate, factToClaim, isCurrent, resolveStream, tmdbClaims } from '../scripts/lib/merge.mjs';
+import { buildReleases, cleanDate, factToClaim, isCurrent, movedIds, resolveStream, tmdbClaims } from '../scripts/lib/merge.mjs';
 
 const TODAY = '2026-10-25';
 let n = 0;
@@ -205,4 +205,130 @@ test('unknown platforms are kept with their display name', () => {
   }, TODAY);
   assert.equal(c.platform, 'x-namma-flix');
   assert.equal(c.platform_name, 'Namma Flix');
+});
+
+test('on equal backing the newer report wins over a more precise older one', () => {
+  // An old round-up's cinema date against a newer "streams in March" story.
+  const s = resolveStream([
+    claim({ date: '2026-11-20', outlet: 'A', published: '2026-11-17T00:00:00Z' }),
+    claim({ date: '2027-03', outlet: 'B', published: '2026-11-23T00:00:00Z' }),
+  ], TODAY);
+  assert.equal(s.date, '2027-03');
+  // A day still beats the month it falls in.
+  const same = resolveStream([
+    claim({ date: '2026-11', outlet: 'A', published: '2026-10-22T00:00:00Z' }),
+    claim({ date: '2026-11-14', outlet: 'A', published: '2026-10-20T00:00:00Z' }),
+  ], TODAY);
+  assert.equal(same.date, '2026-11-14');
+});
+
+// A Telugu film in cinemas from 16 October: streaming within two weeks of that is
+// the cinema date misread.
+const film = (over) => ({
+  tmdb_id: 9, type: 'movie', title: 'Bhogi', original_title: 'Bhogi', language: 'te', year: 2026,
+  poster: null, overview: null, genres: [], cast: [], director: null,
+  theatrical: '2026-10-16', cinema: '2026-10-16', digital: [], providers: [], fetched_at: '2026-10-24T00:00:00.000Z',
+  ...over,
+});
+const bhogi = (over) => claim({ title: 'Bhogi', language: 'te', platform: 'prime-video', date: '2026-10-16', ...over });
+function build(claims, details, opts = {}) {
+  return buildReleases([...claims, ...tmdbClaims(details)],
+    { matches: { 'bhogi|te|movie': { id: 9, type: 'movie' } }, details: { 'movie:9': details }, ...opts }, TODAY);
+}
+
+test('a streaming date within two weeks of the cinema release is ignored', () => {
+  const audit = { implausible: [], unverified: [] };
+  const [r] = build([bhogi()], film(), { audit });
+  assert.equal(r.streams[0].platform, 'prime-video');
+  assert.equal(r.streams[0].date, null);
+  assert.equal(r.streams[0].available, false);
+  assert.deepEqual(audit.implausible.map((x) => [x.title, x.date, x.cinema]), [['Bhogi', '2026-10-16', '2026-10-16']]);
+  // Months before the cinema release ("Fauzi on Netflix" for a March 2027 film).
+  assert.equal(build([bhogi({ date: '2026-10-02' })], film({ cinema: '2027-03-19' }))[0].streams[0].date, null);
+  // A month that ends before the earliest plausible day.
+  assert.equal(build([bhogi({ date: '2026-10' })], film({ cinema: '2026-10-20' }))[0].streams[0].date, null);
+  // A "now streaming" report days after the cinema release.
+  const now = { ...bhogi({ date: null, certainty: 'official', published: '2026-10-18T00:00:00Z' }), available: true };
+  assert.equal(build([now], film())[0].streams[0].available, false);
+});
+
+test('an early streaming date stands when JustWatch, TMDB or three outlets back it', () => {
+  assert.equal(build([bhogi()], film({ providers: ['Amazon Prime Video'] }))[0].streams[0].date, '2026-10-16');
+  assert.equal(build([bhogi()], film({ digital: [{ date: '2026-10-16', note: null }] }))[0].streams[0].date, '2026-10-16');
+  const three = [bhogi({ outlet: 'A' }), bhogi({ outlet: 'B' }), bhogi({ outlet: 'C' })];
+  assert.equal(build(three, film())[0].streams[0].date, '2026-10-16');
+  // Four weeks after the cinema release is normal.
+  assert.equal(build([bhogi({ date: '2026-11-13' })], film())[0].streams[0].date, '2026-11-13');
+});
+
+test('direct-to-OTT films have no cinema date, so their streaming date stands', () => {
+  // TMDB's fallback "theatrical" date is the streaming date; it isn't shown either.
+  const [r] = build([bhogi()], film({ cinema: null }));
+  assert.equal(r.streams[0].date, '2026-10-16');
+  assert.equal(r.theatrical, null);
+  // Entries cached before cinema dates were collected fall back to the old date.
+  const { cinema, ...legacy } = film();
+  assert.equal(build([bhogi()], legacy)[0].streams[0].date, null);
+});
+
+test('a cinema date reported without a platform leaves nothing to list', () => {
+  assert.equal(build([bhogi({ platform: null })], film()).length, 0);
+});
+
+test('a title gets one match whatever language or type each article guessed', () => {
+  const show = { ...film({ tmdb_id: 5, type: 'series', title: 'Rudravanam PS', cinema: null }) };
+  const releases = buildReleases([
+    claim({ title: 'Rudravanam PS', language: 'te', type: 'series', platform: 'zee5' }),
+    claim({ title: 'Rudravanam PS', language: null, type: 'movie', platform: 'zee5', outlet: 'B' }),
+    claim({ title: 'Rudravanam PS', language: 'ko', type: 'movie', platform: 'zee5', outlet: 'C' }),
+  ], {
+    matches: { 'rudravanam ps|te|series': { id: 5, type: 'series' }, 'rudravanam ps||movie': { id: null }, 'rudravanam ps|ko|movie': { id: null } },
+    details: { 'series:5': show },
+  }, TODAY);
+  assert.deepEqual(releases.map((r) => [r.id, r.type, r.streams[0].outlets]), [['series-5', 'series', 3]]);
+});
+
+test('a shared match never joins an English title to an Indian one, or picks between namesakes', () => {
+  const english = film({ tmdb_id: 7, title: 'Law and Order', language: 'en', cinema: null });
+  const ml = claim({ title: 'Law and Order', language: 'ml', platform: 'manorama-max' });
+  const split = buildReleases([claim({ title: 'Law and Order', language: 'en' }), ml],
+    { matches: { 'law and order|en|movie': { id: 7, type: 'movie' } }, details: { 'movie:7': english } }, TODAY);
+  assert.equal(split.length, 2);
+  const two = buildReleases([claim({ title: 'Happy Journey', language: null, outlet: 'Z' })], {
+    matches: { 'happy journey|en|movie': { id: 1, type: 'movie' }, 'happy journey|te|movie': { id: 2, type: 'movie' } },
+    details: { 'movie:1': film({ tmdb_id: 1, language: 'en' }), 'movie:2': film({ tmdb_id: 2, language: 'te' }) },
+  }, TODAY);
+  assert.ok(two[0].id.startsWith('happy-journey-'));
+});
+
+test('with a known-title list, an unmatched title needs to be on it or have two outlets', () => {
+  const audit = { implausible: [], unverified: [] };
+  const lone = claim({ title: 'Megaverse', outlet: 'A' });
+  assert.equal(buildReleases([lone], { known: new Set(), audit }, TODAY).length, 0);
+  assert.deepEqual(audit.unverified.map((r) => r.title), ['Megaverse']);
+  assert.equal(buildReleases([lone], { known: new Set(['megaverse']) }, TODAY).length, 1);
+  assert.equal(buildReleases([lone, claim({ title: 'Megaverse', outlet: 'B' })], { known: new Set() }, TODAY).length, 1);
+  // A new season counts when the show is known.
+  const season = claim({ title: 'Aashram 4', type: 'series', platform: 'amazon-mx-player' });
+  assert.equal(buildReleases([season], { known: new Set(['aashram']) }, TODAY).length, 1);
+  // Without a list nothing is filtered.
+  assert.equal(buildReleases([lone], {}, TODAY).length, 1);
+});
+
+test('movedIds points ids that disappeared at the release now holding the title', () => {
+  const previous = {
+    releases: [
+      { id: 'rudravanam-ps-0180d0', title: 'Rudravanam PS', type: 'movie' },
+      { id: 'dalimb-1a2b3c', title: 'Dalimb 2026 | Dalimb Hindi Movie', type: 'movie' },
+      { id: 'megaverse-moves-closer-1', title: 'Megaverse Moves Closer', type: 'movie' },
+      { id: 'movie-9', title: 'Dalimb', type: 'movie' },
+    ],
+    moved: { 'rudravanam-ps-a83572': 'rudravanam-ps-0180d0', 'old-gone': 'nowhere' },
+  };
+  const releases = [{ id: 'series-5', title: 'Rudravanam PS', type: 'series' }, { id: 'movie-9', title: 'Dalimb', type: 'movie' }];
+  assert.deepEqual(movedIds(previous, releases), {
+    'rudravanam-ps-0180d0': 'series-5',
+    'rudravanam-ps-a83572': 'series-5',
+    'dalimb-1a2b3c': 'movie-9',
+  });
 });

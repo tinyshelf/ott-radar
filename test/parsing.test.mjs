@@ -4,7 +4,7 @@ import { platformId } from '../scripts/lib/platforms.mjs';
 import { parseRss } from '../scripts/lib/rss.mjs';
 import { extractArticleText, normalizeTitle } from '../scripts/lib/text.mjs';
 import { RELEVANT } from '../scripts/lib/sources.mjs';
-import { searchTitle } from '../scripts/lib/tmdb.mjs';
+import { scoreMatch, searchTitle } from '../scripts/lib/tmdb.mjs';
 import { selectHeadlines } from '../scripts/lib/collect.mjs';
 
 test('platformId maps aliases and TMDB provider names', () => {
@@ -94,6 +94,16 @@ test('TMDB search drops the season from series titles', () => {
   assert.equal(searchTitle({ title: 'Dhindora S2', type: 'series' }), 'Dhindora');
   assert.equal(searchTitle({ title: 'Season 2', type: 'series' }), 'Season 2');
   assert.equal(searchTitle({ title: 'Jailer 2', type: 'movie' }), 'Jailer 2');
+  assert.equal(searchTitle({ title: 'Aashram 4', type: 'series' }), 'Aashram');
+  assert.equal(searchTitle({ title: 'Season 2', type: 'series' }), 'Season 2');
+});
+
+test('TMDB matching accepts a long-running show but not an old namesake film', () => {
+  const show = { name: 'Panchayat', original_name: 'Panchayat', original_language: 'hi', first_air_date: '2020-04-03', popularity: 20 };
+  assert.ok(scoreMatch(show, { title: 'Panchayat Season 5', language: 'hi', year: null, type: 'series', refYear: 2026 }) >= 4);
+  assert.ok(scoreMatch({ ...show, name: 'Kanni 2', original_name: 'Kanni 2' }, { title: 'Kanni 2', language: 'hi', year: null, type: 'series', refYear: 2026 }) >= 4);
+  const oldFilm = { title: 'Ramayana', original_title: 'Ramayana', original_language: 'te', release_date: '1997-04-11', popularity: 2 };
+  assert.ok(scoreMatch(oldFilm, { title: 'Ramayana', language: 'te', year: null, type: 'movie', refYear: 2026 }) < 4);
 });
 
 test('backfills spread the article budget over every week, round-ups first', () => {

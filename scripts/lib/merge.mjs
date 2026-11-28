@@ -1,6 +1,8 @@
 import { platformId, normalizePlatformName, PLATFORMS } from './platforms.mjs';
 import { languageCode } from './languages.mjs';
 import { normalizeTitle, shortHash, slugify } from './text.mjs';
+import { searchTitle } from './tmdb.mjs';
+import { tidyTitle } from './rules.mjs';
 
 const DAY = 86400e3;
 // Reports older than this, relative to the newest report for the same
@@ -9,6 +11,11 @@ const RECENCY_WINDOW_DAYS = 21;
 const IMG = 'https://image.tmdb.org/t/p/w342';
 // "Out now" covers OTT releases from this many days back.
 const OUT_NOW_DAYS = 90;
+// Indian films reach OTT four to eight weeks after cinemas, never within two.
+// An earlier streaming date is almost always the cinema date misread: round-ups
+// list both kinds of release, and "OTT rights" stories quote the cinema date.
+export const MIN_CINEMA_GAP_DAYS = 14;
+const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 
 const DATE_RE = /^\d{4}-\d{2}(-\d{2})?$/;
 
@@ -102,8 +109,12 @@ export function resolveStream(claims, today) {
         latest: Math.max(...backers.filter((c) => c.date === d).map(ts)),
       };
     });
-    candidates.sort((a, b) =>
-      (b.outlets - a.outlets) || (b.date.length - a.date.length) || (b.latest - a.latest));
+    // On equal backing, an exact day beats the month it falls in; otherwise the
+    // newer report wins, as it may be a postponement.
+    const related = (x, y) => compatible(x, y) || compatible(y, x);
+    candidates.sort((a, b) => (b.outlets - a.outlets)
+      || (related(a.date, b.date) ? b.date.length - a.date.length : 0)
+      || (b.latest - a.latest));
     const best = candidates[0];
     date = best.date;
     support = best.backers;
@@ -172,21 +183,74 @@ export function isCurrent(release, today, days = OUT_NOW_DAYS) {
   return !dated.length && (release.year ?? 0) >= Number(today.slice(0, 4)) - 1 && undated.length > 0;
 }
 
+// One title, one match. The match cache is keyed by title, language and type as
+// guessed from each article, so a stray "Korean" in a round-up, or a series the
+// articles call a film, gives a title a key of its own that may have found
+// nothing. Such a claim joins the match another key found for the same title,
+// unless several titles share the name or one side is English and the other isn't
+// ("Law and Order" the Malayalam film).
+function titleMatches(matches, details) {
+  const byTitle = new Map();
+  for (const [k, m] of Object.entries(matches)) {
+    if (!m?.id) continue;
+    const title = k.split('|')[0];
+    if (!byTitle.has(title)) byTitle.set(title, new Set());
+    byTitle.get(title).add(`${m.type}:${m.id}`);
+  }
+  return (c) => {
+    const ids = byTitle.get(normalizeTitle(c.title));
+    if (ids?.size !== 1) return null;
+    const [id] = ids;
+    const lang = details[id]?.language;
+    if (c.language && lang && c.language !== lang && (c.language === 'en' || lang === 'en')) return null;
+    return id;
+  };
+}
+
+// Drops streaming dates (and "now streaming" claims) that fall before a film's
+// cinema release plus MIN_CINEMA_GAP_DAYS, unless something independent backs
+// them: JustWatch lists the film on that platform, TMDB has that digital date, or
+// three outlets agree. Direct-to-OTT films have no cinema date, or are backed.
+function plausibleAfterCinema(group, info, implausible) {
+  const cinema = info.cinema !== undefined ? info.cinema : info.theatrical;
+  if (!cinema || info.type === 'series') return group;
+  const earliest = addDays(cinema, MIN_CINEMA_GAP_DAYS);
+  const tooEarly = (d) => (d.length === 7 ? d < earliest.slice(0, 7) : d < earliest);
+  const justWatch = new Set(group.filter((c) => c.outlet === 'JustWatch').map((c) => c.platform));
+  const digital = new Set((info.digital ?? []).map((d) => d.date));
+  const outletsFor = (date) => newsOutlets(group.filter((c) => !c.tmdb && c.date === date));
+  const backed = (c) => justWatch.has(c.platform) || (!c.platform && justWatch.size > 0)
+    || (!!c.date && (digital.has(c.date) || outletsFor(c.date) >= 3));
+  return group.map((c) => {
+    if (c.tmdb) return c;
+    const early = c.date ? tooEarly(c.date) : c.available && tooEarly(String(c.published ?? c.seen).slice(0, 10));
+    if (!early || backed(c)) return c;
+    implausible?.push({ title: info.title, platform: c.platform, date: c.date, cinema, outlet: c.outlet });
+    return { ...c, date: null, available: undefined };
+  });
+}
+
 // Groups all claims into releases for the site.
 // `matches` maps matchKey -> { id, type } | null; `details` maps "type:id" -> TMDB details;
-// `ratings` maps IMDb id -> [rating, votes].
-export function buildReleases(claims, { matches = {}, details = {}, ratings = {} } = {}, today) {
+// `ratings` maps IMDb id -> [rating, votes]. With `known` (normalized titles from
+// Wikipedia/TMDB lists), a title with no TMDB match is kept only if it is a known
+// title or two outlets report it: one outlet alone is usually a misread headline.
+// `audit`, if given, collects what was left out: { implausible: [claim info],
+// unverified: [release] }.
+export function buildReleases(claims, { matches = {}, details = {}, ratings = {}, known = null, audit = null } = {}, today) {
+  const shared = titleMatches(matches, details);
   const groups = new Map();
   for (const c of claims) {
     const m = c.tmdb ? null : matches[matchKey(c)];
-    const key = c.tmdb ?? (m?.id ? `${m.type}:${m.id}` : `t:${normalizeTitle(c.title)}|${c.type}`);
+    const key = c.tmdb ?? (m?.id ? `${m.type}:${m.id}` : shared(c) ?? `t:${normalizeTitle(c.title)}|${c.type}`);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   }
 
   const releases = [];
-  for (const [key, group] of groups) {
+  for (const [key, rawGroup] of groups) {
     const info = details[key] ?? null;
+    const group = info ? plausibleAfterCinema(rawGroup, info, audit?.implausible) : rawGroup;
     const byPlatform = new Map();
     const unassigned = [];
     for (const c of group) {
@@ -218,11 +282,14 @@ export function buildReleases(claims, { matches = {}, details = {}, ratings = {}
 
     const newsClaims = group.filter((c) => !c.tmdb);
     const title = info?.title ?? mostCommon(newsClaims.map((c) => c.title)) ?? group[0].title;
-    releases.push({
+    const type = info?.type ?? mostCommon(group.map((c) => c.type)) ?? 'movie';
+    const unverified = !info && known && newsOutlets(newsClaims) < 2
+      && !known.has(normalizeTitle(title)) && !known.has(normalizeTitle(searchTitle({ title, type })));
+    const release = {
       id: info ? key.replace(':', '-') : `${slugify(title)}-${shortHash(key).slice(0, 6)}`,
       title,
       original_title: info?.original_title && info.original_title !== title ? info.original_title : undefined,
-      type: info?.type ?? mostCommon(group.map((c) => c.type)) ?? 'movie',
+      type,
       language: info?.language ?? mostCommon(group.map((c) => c.language)),
       year: info?.year ?? mostCommon(group.map((c) => c.year)),
       poster: info?.poster ? IMG + info.poster : null,
@@ -230,11 +297,47 @@ export function buildReleases(claims, { matches = {}, details = {}, ratings = {}
       genres: info?.genres ?? [],
       cast: info?.cast ?? [],
       director: info?.director ?? null,
-      theatrical: info?.theatrical ?? null,
+      // TMDB's fallback date is the streaming date for a direct-to-OTT film.
+      theatrical: (info?.cinema !== undefined ? info.cinema : info?.theatrical) ?? null,
       tmdb: info ? `https://www.themoviedb.org/${info.type === 'series' ? 'tv' : 'movie'}/${info.tmdb_id}` : null,
       imdb: info?.imdb_id ? { id: info.imdb_id, rating: ratings[info.imdb_id]?.[0] ?? null, votes: ratings[info.imdb_id]?.[1] ?? null } : null,
       streams,
-    });
+    };
+    if (unverified) audit?.unverified.push(release);
+    else releases.push(release);
   }
   return releases.sort((a, b) => a.title.localeCompare(b.title));
+}
+
+// Saved titles are stored by release id, and an id changes when a title gets (or
+// changes) its TMDB match. Maps each id that disappeared to the release that now
+// carries the same title, so the site can move saved titles across.
+export function movedIds(previous, releases) {
+  const current = new Set(releases.map((r) => r.id));
+  const byTitle = new Map();
+  for (const r of releases) {
+    const k = normalizeTitle(r.title);
+    if (!byTitle.has(k)) byTitle.set(k, []);
+    byTitle.get(k).push(r);
+  }
+  const find = (r) => {
+    for (const title of [r.title, tidyTitle(r.title)].filter(Boolean)) {
+      const hits = byTitle.get(normalizeTitle(title)) ?? [];
+      const pick = hits.length === 1 ? hits : hits.filter((h) => h.type === r.type);
+      if (pick.length === 1) return pick[0].id;
+    }
+    return null;
+  };
+  const now = {};
+  for (const r of previous.releases ?? []) {
+    if (current.has(r.id)) continue;
+    const to = find(r);
+    if (to) now[r.id] = to;
+  }
+  const moved = {};
+  for (const [from, to] of Object.entries(previous.moved ?? {})) {
+    const target = current.has(to) ? to : now[to];
+    if (target && !current.has(from)) moved[from] = target;
+  }
+  return { ...moved, ...now };
 }

@@ -25,14 +25,17 @@ claims (+ optional TMDB posters/availability) ─► merge.mjs ─► releases.j
 
 A date counts only when the closest cue word is about streaming, not theatres, announcements or trailers. Hedged wording ("expected", "reportedly", "not confirmed") marks a claim as a rumour.
 
-**Merging** (`scripts/lib/merge.mjs`) treats every fact as a *claim* from one outlet. For each title and platform it:
+**Merging** (`scripts/lib/merge.mjs`) treats every fact as a *claim* from one outlet. Each title gets one TMDB match, even when articles guessed its language or type differently. For each title and platform it:
 
+- ignores a streaming date earlier than 14 days after the film's cinema release (from TMDB), unless JustWatch already lists it there, TMDB has the same digital date, or 3+ outlets agree. Round-ups list cinema and OTT releases side by side, and "OTT rights" stories quote the cinema date, so this is the usual source of a film shown as out before it streams. Direct-to-OTT films have no cinema date and aren't affected
 - ignores reports more than 21 days older than the newest one, which handles postponements
-- prefers official announcements, then the date backed by the most distinct outlets
+- prefers official announcements, then the date backed by the most distinct outlets, then the newest report
 - drops platforms that only a small minority of outlets mention, which are usually a neighbouring title's platform picked up by mistake
 - labels the result **Confirmed** (official, 2+ outlets agree, or JustWatch shows it streaming), **Reported** (one outlet), or **Rumoured** (only hedged reports)
 
-The site lists releases that are upcoming or came out on OTT in the last 90 days. A title JustWatch shows as streaming, with no news about it, counts only if it is from this year or last. The list can be sorted and filtered by IMDb rating; the sort weights each rating by its vote count, as IMDb's own charts do.
+A title with no TMDB match is listed only if it is on the Wikipedia/TMDB title list or two outlets report it. A single outlet alone is usually a misread headline ("Jailer 2 Makes", "Next Week"). Each run's log lists the dates and titles these rules left out.
+
+The site lists releases that are upcoming or came out on OTT in the last 90 days. A release's id changes when it first gets a TMDB match; `releases.json` maps old ids to new ones, so saved titles stay saved. A title JustWatch shows as streaming, with no news about it, counts only if it is from this year or last. The list can be sorted and filtered by IMDb rating; the sort weights each rating by its vote count, as IMDb's own charts do.
 
 Rule-based extraction makes mistakes that an AI model wouldn't. The labels and the cross-checking contain most of them: a wrong fact from one article stays "Reported", while popular titles end up backed by 10–30 outlets. Tap any card to see the source articles.
 

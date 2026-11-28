@@ -59,6 +59,22 @@ test('headlineTitle pulls single titles and rejects round-ups and announcements'
   assert.equal(headlineTitle('7 South OTT Releases to Watch This Week: Nani starrer The Paradise'), null);
 });
 
+test('headlineTitle drops verbs, language tags and descriptors around the title', () => {
+  const cases = {
+    'Rajinikanth’s Jailer 2 Makes Digital Debut On Amazon Prime Video': 'Jailer 2',
+    'Hanuman Ansh To Release On Netflix In 5 Languages This November, Check Streaming Date': 'Hanuman Ansh',
+    'Show Cause Short Film Now Streaming on ManoramaMAX – Sudhee Krishnan’s Malayalam Police Drama': 'Show Cause',
+    'CULT Telugu Movie OTT Release on Prime Video – Vishwak Sen’s Psychological Slasher Thriller': 'CULT',
+    'Dalimb 2026 | Dalimb Hindi Movie: Release Date, Cast, Story, Ott, Review, Trailer, Photos': 'Dalimb',
+    'Ajay Devgn led Drishyam: The Conclusion gets OTT premiere date': 'Drishyam: The Conclusion',
+    'Sridevi Apalla’s Tamil Debut Haiku Gets OTT Release Date': 'Haiku',
+    'Ranabaali Is Coming To Netflix: Streaming Date, Languages And 5 Things To Know': 'Ranabaali',
+    'Aadarsha Kutumbam, Drishyam 3, and More On OTT': null,
+    'One in Theatres, Another on OTT! Vishwak Sen Gets a Rare Double Release Treat': null,
+  };
+  for (const [headline, want] of Object.entries(cases)) assert.equal(headlineTitle(headline), want, headline);
+});
+
 test('tidyTitle strips headline status words and rejects fragments', () => {
   const cases = {
     'Baththa Now Streaming': 'Baththa',
@@ -74,6 +90,19 @@ test('tidyTitle strips headline status words and rejects fragments', () => {
     'Dorothy, starring Keerthy Suresh,': 'Dorothy',
     'OTT Alert: Anakapalli': 'Anakapalli',
     'The Vvan Hits': 'The Vvan',
+    'Dalimb 2026 | Dalimb Hindi Movie': 'Dalimb',
+    'DNA Malayalam': 'DNA',
+    'Scene Tamil Movie': 'Scene',
+    'CULT Telugu': 'CULT',
+    'Jailer 2 Makes': 'Jailer 2',
+    'Jailer 2 release': 'Jailer 2',
+    'The Third Murder released': 'The Third Murder',
+    'Hanuman Ansh To Release': 'Hanuman Ansh',
+    'Ranabaali Is Coming To Netflix': 'Ranabaali',
+    'Megaverse Moves Closer': 'Megaverse',
+    'Ajay Devgn led Drishyam: The Conclusion': 'Drishyam: The Conclusion',
+    'Tamil Debut Haiku': 'Haiku',
+    'OTT: Garividi Lakshmi': 'Garividi Lakshmi',
     // Real titles stay as they are.
     'Mirzapur: The Movie': 'Mirzapur: The Movie',
     'Ramayana: Part 1': 'Ramayana: Part 1',
@@ -84,9 +113,16 @@ test('tidyTitle strips headline status words and rejects fragments', () => {
     '418 Movie Watch Online:': '418',
     'The Super Mario Galaxy Movie': 'The Super Mario Galaxy Movie',
     'The Big Short': 'The Big Short',
+    'Delhi 2021': 'Delhi 2021',
+    'Scam 2010': 'Scam 2010',
+    'Hindi Medium': 'Hindi Medium',
+    'English Vinglish': 'English Vinglish',
+    'Coming to America': 'Coming to America',
+    'The Traitors (Telugu)': 'The Traitors (Telugu)',
   };
   for (const [raw, want] of Object.entries(cases)) assert.equal(tidyTitle(raw), want, raw);
-  for (const junk of ['850 Crore Blockbuster', 'Rs 800 Crore Hit, Yet', 'From Theatres', 'Netflix October 30', 'Akka to Obsession: 7', '8 South', 'Friday', 'Halloween']) {
+  for (const junk of ['850 Crore Blockbuster', 'Rs 800 Crore Hit, Yet', 'From Theatres', 'Netflix October 30', 'Akka to Obsession: 7', '8 South', 'Friday', 'Halloween',
+    'Aadarsha Kutumbam, Drishyam 3, and More', 'One in Theatres, Another', 'Next Week']) {
     assert.equal(tidyTitle(junk), null, junk);
   }
 });

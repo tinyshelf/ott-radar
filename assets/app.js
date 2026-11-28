@@ -408,6 +408,14 @@ async function init() {
     $('#list').replaceChildren(el('p', { class: 'empty' }, `Couldn't load release data (${err.message}).`));
     return;
   }
+  // A release's id changes when it gets matched on TMDB; keep saved titles saved.
+  const current = new Set(DATA.releases.map((r) => r.id));
+  const moved = [...state.saved].filter((id) => !current.has(id) && DATA.moved?.[id]);
+  for (const id of moved) {
+    state.saved.delete(id);
+    state.saved.add(DATA.moved[id]);
+  }
+  if (moved.length) store.set('saved', [...state.saved]);
   if (DATA.updated_at) {
     const d = new Date(DATA.updated_at);
     $('#updated').textContent = `Updated ${d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`;
